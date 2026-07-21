@@ -10,8 +10,9 @@ import { useState, useEffect } from 'react';
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [setupComplete, setSetupComplete] = useState(true);
+  const [setupComplete, setSetupComplete] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [globalError, setGlobalError] = useState('');
 
   useEffect(() => {
     const checkSetup = async () => {
@@ -20,9 +21,12 @@ function App() {
         if (resp.ok) {
           const data = await resp.json();
           setSetupComplete(data.setupComplete);
+        } else {
+          setGlobalError('Backend returned an error. If you just updated, you MUST wipe your old database (docker-compose down -v).');
         }
       } catch (e) {
         console.error(e);
+        setGlobalError('Failed to connect to backend server.');
       } finally {
         setLoading(false);
       }
@@ -45,6 +49,17 @@ function App() {
   };
 
   if (loading) return null;
+
+  if (globalError) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: '2rem' }}>
+        <div className="glass-panel animate-fade-in" style={{ maxWidth: '600px', textAlign: 'center' }}>
+          <h2 style={{ color: 'var(--danger)', marginBottom: '1rem' }}>Application Error</h2>
+          <p>{globalError}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Router>
