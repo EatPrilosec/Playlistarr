@@ -31,8 +31,6 @@ services:
     volumes:
       # Persists the SQLite database and sync logs
       - ./data:/app/data
-    environment:
-      - DATABASE_URL=sqlite:////app/data/playlistarr.db
 
 > **Note:** The above configuration runs Playlistarr as a single, standalone container.
 

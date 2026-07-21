@@ -9,5 +9,3 @@ services:
       - "8670:8670"
     volumes:
       - ./data:/app/data
-    environment:
-      - DATABASE_URL=sqlite:////app/data/playlistarr.db
