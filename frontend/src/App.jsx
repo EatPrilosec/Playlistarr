@@ -2,7 +2,6 @@ import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate } f
 import { Play } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import Admin from './pages/Admin';
 import Setup from './pages/Setup';
 import Settings from './pages/Settings';
 import { useState, useEffect } from 'react';
