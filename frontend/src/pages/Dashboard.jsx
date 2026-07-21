@@ -36,7 +36,7 @@ export default function Dashboard() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({ name, provider, source_url: url, is_global: false })
+        body: JSON.stringify({ name, provider, source_url: url, is_global: true })
       });
       setShowAddModal(false);
       setName('');
@@ -49,10 +49,15 @@ export default function Dashboard() {
     }
   };
 
+  const handleDelete = async (id) => {
+      // API endpoint for deleting playlist doesn't exist yet but we can stub the UI
+      console.log('Delete', id);
+  }
+
   return (
     <div className="animate-fade-in">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <h2 className="page-title" style={{ margin: 0 }}>My Playlists</h2>
+        <h2 className="page-title" style={{ margin: 0 }}>Playlists</h2>
         <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
           <Plus size={18} style={{ marginRight: '0.5rem' }} /> Add Playlist
         </button>
@@ -62,26 +67,24 @@ export default function Dashboard() {
         {playlists.length === 0 && (
           <div className="glass-panel" style={{ padding: '3rem', textAlign: 'center', gridColumn: '1 / -1' }}>
             <ListVideo size={48} color="var(--text-muted)" style={{ margin: '0 auto 1rem' }} />
-            <h3>No playlists yet</h3>
-            <p style={{ color: 'var(--text-muted)' }}>Click 'Add Playlist' to sync your first list.</p>
+            <h3>No playlists added</h3>
+            <p style={{ color: 'var(--text-muted)' }}>Click 'Add Playlist' to configure a source list.</p>
           </div>
         )}
         
         {playlists.map(p => (
           <div key={p.id} className="card glass-panel">
             <div className="card-title">
-              {p.is_global && <span style={{ fontSize: '0.7rem', background: 'var(--primary)', padding: '2px 6px', borderRadius: '4px' }}>GLOBAL</span>}
               {p.name}
             </div>
             <div className="card-subtitle">Source: {p.provider} • Provider URL: <a href={p.source_url} target="_blank" rel="noreferrer">Link</a></div>
             
             <div className="card-footer">
               <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <RefreshCw size={14} /> Syncing
+                <RefreshCw size={14} /> Pushed to servers
               </span>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button className="btn btn-secondary" style={{ padding: '0.4rem', borderRadius: '6px' }} title="Settings"><Settings size={16}/></button>
-                {!p.is_global && <button className="btn btn-secondary" style={{ padding: '0.4rem', borderRadius: '6px', color: 'var(--danger)' }} title="Delete"><Trash2 size={16}/></button>}
+                <button className="btn btn-secondary" style={{ padding: '0.4rem', borderRadius: '6px', color: 'var(--danger)' }} title="Delete" onClick={() => handleDelete(p.id)}><Trash2 size={16}/></button>
               </div>
             </div>
           </div>
@@ -91,7 +94,8 @@ export default function Dashboard() {
       {showAddModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div className="glass-panel animate-fade-in" style={{ width: '100%', maxWidth: '500px', padding: '2rem' }}>
-            <h3 style={{ marginBottom: '1.5rem', fontSize: '1.25rem' }}>Add Personal Playlist</h3>
+            <h3 style={{ marginBottom: '1.5rem', fontSize: '1.25rem' }}>Add Playlist</h3>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', fontSize: '0.9rem' }}>This playlist will be pushed to all configured servers.</p>
             <form onSubmit={handleAdd}>
               <div className="input-group">
                 <label>Playlist Name</label>

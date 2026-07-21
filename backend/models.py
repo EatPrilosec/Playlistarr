@@ -10,17 +10,15 @@ class Server(Base):
     url = Column(String, unique=True, index=True)
     server_type = Column(String) # "emby" or "jellyfin"
     name = Column(String, nullable=True)
+    api_key = Column(String, nullable=True)
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, index=True)
-    server_id = Column(Integer, ForeignKey("servers.id"))
-    api_key = Column(String) # Token retrieved after auth
+    username = Column(String, unique=True, index=True)
+    password_hash = Column(String)
     is_admin = Column(Boolean, default=False)
-    
-    server = relationship("Server")
 
 class ListConfig(Base):
     __tablename__ = "list_configs"

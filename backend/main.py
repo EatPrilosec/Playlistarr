@@ -44,8 +44,10 @@ app.add_middleware(
 
 from .api.auth import router as auth_router
 from .api.playlists import router as playlists_router
+from .api.settings import router as settings_router
 app.include_router(auth_router)
 app.include_router(playlists_router)
+app.include_router(settings_router)
 
 @app.get("/api/health")
 async def health_check():

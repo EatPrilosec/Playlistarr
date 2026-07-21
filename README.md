@@ -27,7 +27,7 @@ services:
     container_name: playlistarr
     restart: unless-stopped
     ports:
-      - "8670:8670"
+      - "8671:8671"
     volumes:
       - ./data:/app/data
 

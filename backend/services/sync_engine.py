@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from ..models import ListConfig, User, Server, SyncLog
+from ..models import ListConfig, Server, SyncLog
 from .providers.factory import get_provider
 from .media_server import MediaServerClient
 import datetime
@@ -18,23 +18,14 @@ async def sync_list_config(db: Session, list_config: ListConfig):
         else: # custom
             items.sort(key=lambda x: x.get("order", 0))
 
-        # Find users who should receive this playlist
-        # If global, all users on the same server or all servers? All users.
-        users = []
-        if list_config.is_global:
-            users = db.query(User).all()
-        else:
-            users = [db.query(User).filter(User.id == list_config.user_id).first()]
+        # Push to ALL configured servers
+        servers = db.query(Server).all()
 
-        for user in users:
-            if not user or not user.server_id:
-                continue
-                
-            server = db.query(Server).filter(Server.id == user.server_id).first()
-            if not server or not user.api_key:
+        for server in servers:
+            if not server.api_key:
                 continue
 
-            ms_client = MediaServerClient(server.url, user.api_key)
+            ms_client = MediaServerClient(server.url, server.api_key)
             
             # Match items
             matched_ids = []
@@ -49,7 +40,7 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                 await ms_client.create_or_update_playlist(list_config.name, matched_ids)
                 
         # Update log
-        log = SyncLog(list_config_id=list_config.id, status="success", details=f"Synced {len(items)} items")
+        log = SyncLog(list_config_id=list_config.id, status="success", details=f"Synced {len(items)} items to {len(servers)} servers")
         db.add(log)
         db.commit()
 
