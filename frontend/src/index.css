@@ -140,6 +140,7 @@ a:hover {
   font-size: 1.5rem;
   font-weight: 700;
   background: linear-gradient(to right, #818cf8, #c084fc);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   letter-spacing: -0.5px;
