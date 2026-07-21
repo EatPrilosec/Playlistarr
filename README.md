@@ -29,7 +29,6 @@ services:
     ports:
       - "8670:8670"
     volumes:
-      # Persists the SQLite database and sync logs
       - ./data:/app/data
 
 > **Note:** The above configuration runs Playlistarr as a single, standalone container.

@@ -30,5 +30,5 @@ COPY backend ./backend
 # (If we want FastAPI to serve the React build, we can mount it here)
 COPY --from=frontend-build /app/dist ./frontend/dist
 
-EXPOSE 8670
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8670"]
+EXPOSE 8671
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8671"]
