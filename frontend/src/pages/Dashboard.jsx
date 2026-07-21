@@ -13,7 +13,7 @@ export default function Dashboard() {
 
   const fetchPlaylists = async () => {
     try {
-      const resp = await fetch('http://localhost:8000/api/playlists', {
+      const resp = await fetch('/api/playlists', {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
       if (resp.ok) setPlaylists(await resp.json());
@@ -30,7 +30,7 @@ export default function Dashboard() {
     e.preventDefault();
     setLoading(true);
     try {
-      await fetch('http://localhost:8000/api/playlists', {
+      await fetch('/api/playlists', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

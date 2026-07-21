@@ -14,7 +14,7 @@ export default function Login({ setAuth, setAdmin }) {
     setError('');
     
     try {
-      const resp = await fetch('http://localhost:8000/api/auth/login', {
+      const resp = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ server_url: url, username, password })

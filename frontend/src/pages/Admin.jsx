@@ -13,7 +13,7 @@ export default function Admin() {
 
   const fetchPlaylists = async () => {
     try {
-      const resp = await fetch('http://localhost:8000/api/playlists', {
+      const resp = await fetch('/api/playlists', {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
       if (resp.ok) {
@@ -34,7 +34,7 @@ export default function Admin() {
     e.preventDefault();
     setLoading(true);
     try {
-      await fetch('http://localhost:8000/api/playlists', {
+      await fetch('/api/playlists', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

@@ -22,33 +22,23 @@ Create a `docker-compose.yml` file:
 version: '3.8'
 
 services:
-  playlistarr-backend:
+  playlistarr:
     image: ghcr.io/eatprilosec/playlistarr:master
-    container_name: playlistarr-backend
+    container_name: playlistarr
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8670:8670"
     volumes:
       # Persists the SQLite database and sync logs
       - ./data:/app/data
     environment:
       - DATABASE_URL=sqlite:////app/data/playlistarr.db
 
-  playlistarr-frontend:
-    image: ghcr.io/eatprilosec/playlistarr:master
-    # The frontend is built into the image, but if you want to run the dev server:
-    # command: npm run dev -- --host
-    container_name: playlistarr-frontend
-    restart: unless-stopped
-    ports:
-      - "5173:5173"
-```
-
-> **Note:** The above docker-compose config separates the frontend and backend using the multi-stage build. If you want to use the unified production build, refer to the advanced deployment docs.
+> **Note:** The above configuration runs Playlistarr as a single, standalone container.
 
 ## Configuration Example
 
-Once the containers are running, navigate to `http://localhost:5173` to access the web UI.
+Once the container is running, navigate to `http://localhost:8670` to access the web UI.
 
 ### 1. Login
 Playlistarr uses your existing Emby or Jellyfin credentials.
