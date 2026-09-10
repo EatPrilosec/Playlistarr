@@ -8,4 +8,4 @@ services:
     ports:
       - "8671:8671"
     volumes:
-      - ./data:/app/data
+      - ./config:/config

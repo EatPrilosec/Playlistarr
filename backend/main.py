@@ -13,8 +13,10 @@ async def lifespan(app: FastAPI):
     print("Starting background sync engine...")
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from .services.sync_engine import run_sync_all
+    from .models import AppSetting
     
     scheduler = AsyncIOScheduler()
+    app.state.scheduler = scheduler
     
     async def sync_job():
         db = SessionLocal()
@@ -23,7 +25,14 @@ async def lifespan(app: FastAPI):
         finally:
             db.close()
             
-    scheduler.add_job(sync_job, 'interval', hours=1)
+    db = SessionLocal()
+    try:
+        interval_setting = db.query(AppSetting).filter(AppSetting.key == "sync_interval").first()
+        hours = int(interval_setting.value) if interval_setting else 1
+    finally:
+        db.close()
+        
+    scheduler.add_job(sync_job, 'interval', hours=hours, id='sync_job')
     scheduler.start()
     
     yield

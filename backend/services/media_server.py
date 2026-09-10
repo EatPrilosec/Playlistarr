@@ -36,16 +36,35 @@ class MediaServerClient:
                     return items[0].get("Id")
         return None
 
-    async def create_or_update_playlist(self, name: str, item_ids: list[str]):
+    async def get_users(self) -> list[dict]:
+        """Fetch all users from the media server"""
+        url = f"{self.server_url}/Users"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, params={"api_key": self.api_key})
+            if resp.status_code == 200:
+                return resp.json()
+        return []
+
+    async def create_or_update_playlist(self, name: str, item_ids: list[str], user_id: str = None):
         """Creates a playlist or updates an existing one"""
+        if not user_id:
+            # Fallback to the first user if none provided (Jellyfin requires it)
+            users = await self.get_users()
+            if users:
+                user_id = users[0]["Id"]
+            else:
+                raise Exception("No users found on media server to assign playlist")
+                
         # First check if playlist exists
         url = f"{self.server_url}/Items"
         params = {
             "IncludeItemTypes": "Playlist",
             "Recursive": "true",
             "SearchTerm": name,
-            "api_key": self.api_key
+            "api_key": self.api_key,
+            "userId": user_id
         }
+            
         playlist_id = None
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, params=params)
@@ -57,26 +76,29 @@ class MediaServerClient:
                         break
         
         # We either create a new one with items, or update existing
-        if not playlist_id:
-            create_url = f"{self.server_url}/Playlists"
-            payload = {
-                "Name": name,
-                "Ids": ",".join(item_ids)
-            }
-            async with httpx.AsyncClient() as client:
-                await client.post(create_url, json=payload, params={"api_key": self.api_key})
-        else:
-            # Clear and add items? Or delete and recreate? Emby API allows POST /Playlists/{Id}/Items
-            # Simplest way: Delete and recreate
+        if playlist_id:
             delete_url = f"{self.server_url}/Items/{playlist_id}"
             async with httpx.AsyncClient() as client:
                 await client.delete(delete_url, params={"api_key": self.api_key})
             
-            # Recreate
-            create_url = f"{self.server_url}/Playlists"
-            payload = {
-                "Name": name,
+        create_url = f"{self.server_url}/Playlists"
+        create_params = {"api_key": self.api_key, "userId": user_id}
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(create_url, json={"Name": name}, params=create_params)
+            if resp.status_code != 200:
+                raise Exception(f"Failed to create playlist {name}: {resp.status_code} {resp.text}")
+                
+            playlist_id = resp.json().get("Id")
+            
+        if item_ids and playlist_id:
+            add_items_url = f"{self.server_url}/Playlists/{playlist_id}/Items"
+            add_params = {
+                "api_key": self.api_key,
+                "userId": user_id,
                 "Ids": ",".join(item_ids)
             }
             async with httpx.AsyncClient() as client:
-                await client.post(create_url, json=payload, params={"api_key": self.api_key})
+                resp = await client.post(add_items_url, params=add_params)
+                if resp.status_code not in [200, 204]:
+                    raise Exception(f"Failed to add items to playlist: {resp.status_code} {resp.text}")

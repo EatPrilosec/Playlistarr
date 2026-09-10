@@ -35,8 +35,23 @@ function App() {
     const token = localStorage.getItem('token');
     const admin = localStorage.getItem('isAdmin') === 'true';
     if (token) {
-      setIsAuthenticated(true);
-      setIsAdmin(admin);
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        if (payload.exp && payload.exp * 1000 < Date.now()) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('isAdmin');
+          setIsAuthenticated(false);
+          setIsAdmin(false);
+        } else {
+          setIsAuthenticated(true);
+          setIsAdmin(admin);
+        }
+      } catch (e) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('isAdmin');
+        setIsAuthenticated(false);
+        setIsAdmin(false);
+      }
     }
   }, []);
 

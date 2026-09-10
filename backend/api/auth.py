@@ -62,7 +62,11 @@ async def login(req: LoginRequest, db: Session = Depends(get_db)):
     
     return LoginResponse(token=token, is_admin=user.is_admin)
 
-def get_current_user(token: str, db: Session = Depends(get_db)):
+from fastapi.security import OAuth2PasswordBearer
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         user_id = payload.get("sub")

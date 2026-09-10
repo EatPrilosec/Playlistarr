@@ -29,13 +29,14 @@ services:
     ports:
       - "8671:8671"
     volumes:
-      - ./data:/app/data
+      - /path/to/config:/config
+```
 
 > **Note:** The above configuration runs Playlistarr as a single, standalone container.
 
 ## Configuration Example
 
-Once the container is running, navigate to `http://localhost:8670` to access the web UI.
+Once the container is running, navigate to `http://localhost:8671` to access the web UI.
 
 ### 1. Login
 Playlistarr uses your existing Emby or Jellyfin credentials.

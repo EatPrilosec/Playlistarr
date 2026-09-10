@@ -29,6 +29,7 @@ class ListConfig(Base):
     source_url = Column(String)
     sort_order = Column(String, default="custom") # custom, date_added, rank
     is_global = Column(Boolean, default=False)
+    target_username = Column(String, nullable=True) # Target Emby/JF user
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True) # Null if global
     
     user = relationship("User")
@@ -41,3 +42,8 @@ class SyncLog(Base):
     status = Column(String)
     last_sync = Column(DateTime, default=datetime.datetime.utcnow)
     details = Column(String, nullable=True)
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+    key = Column(String, primary_key=True, index=True)
+    value = Column(String)
