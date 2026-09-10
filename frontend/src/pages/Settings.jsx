@@ -138,6 +138,42 @@ export default function Settings() {
       console.error(e);
     }
   };
+  const handleCopyCode = async (text) => {
+    if (!text) return;
+    let copied = false;
+    // 1. Try modern navigator.clipboard if available
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (err) {
+        console.warn('navigator.clipboard failed:', err);
+      }
+    }
+    // 2. Fallback to execCommand for HTTP / LAN contexts
+    if (!copied) {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        copied = document.execCommand('copy');
+        document.body.removeChild(textarea);
+      } catch (err) {
+        console.error('Fallback copy failed:', err);
+      }
+    }
+
+    if (copied) {
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    }
+  };
 
   const handleTest = async () => {
     if (!url || !apiKey) {
@@ -430,31 +466,35 @@ export default function Settings() {
                   <div style={{ marginBottom: '1.5rem' }}>
                     <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step 2: Enter this code</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
-                      <span style={{
-                        fontFamily: 'monospace',
-                        fontSize: '1.75rem',
-                        fontWeight: 700,
-                        letterSpacing: '0.15em',
-                        background: 'rgba(99, 102, 241, 0.15)',
-                        border: '1px solid var(--primary)',
-                        padding: '0.5rem 1.25rem',
-                        borderRadius: '8px',
-                        color: '#fff'
-                      }}>
+                      <span 
+                        onClick={() => handleCopyCode(deviceAuth.user_code)}
+                        title="Click to copy"
+                        style={{
+                          fontFamily: 'monospace',
+                          fontSize: '1.75rem',
+                          fontWeight: 700,
+                          letterSpacing: '0.15em',
+                          background: 'rgba(99, 102, 241, 0.15)',
+                          border: '1px solid var(--primary)',
+                          padding: '0.5rem 1.25rem',
+                          borderRadius: '8px',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          userSelect: 'all'
+                        }}
+                      >
                         {deviceAuth.user_code}
                       </span>
                       <button 
                         type="button" 
                         className="btn btn-secondary"
-                        onClick={() => {
-                          navigator.clipboard.writeText(deviceAuth.user_code);
-                          setCopySuccess(true);
-                          setTimeout(() => setCopySuccess(false), 2000);
-                        }}
+                        onClick={() => handleCopyCode(deviceAuth.user_code)}
                         title="Copy Code"
                       >
                         {copySuccess ? <Check size={18} color="var(--success)" /> : <Copy size={18} />}
-                        <span style={{ marginLeft: '0.4rem', fontSize: '0.85rem' }}>{copySuccess ? 'Copied!' : 'Copy'}</span>
+                        <span style={{ marginLeft: '0.4rem', fontSize: '0.85rem', color: copySuccess ? 'var(--success)' : 'inherit' }}>
+                          {copySuccess ? 'Copied!' : 'Copy'}
+                        </span>
                       </button>
                     </div>
                   </div>
