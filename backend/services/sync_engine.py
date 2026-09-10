@@ -1,12 +1,14 @@
+import asyncio
+import httpx
+import datetime
 from sqlalchemy.orm import Session
 from ..models import ListConfig, Server, SyncLog
 from .providers.factory import get_provider
 from .media_server import MediaServerClient
-import datetime
 
 async def sync_list_config(db: Session, list_config: ListConfig):
     try:
-        # Get provider
+        # Get provider and fetch list
         provider = get_provider(list_config.source_url, list_config.provider)
         items = await provider.fetch_list()
         
@@ -15,12 +17,11 @@ async def sync_list_config(db: Session, list_config: ListConfig):
             pass # Needs provider support
         elif list_config.sort_order == "rank":
             pass # Needs provider support
-        else: # custom
+        else: # custom / default
             items.sort(key=lambda x: x.get("order", 0))
 
         # Push to ALL configured servers
         servers = db.query(Server).all()
-        
         results = []
 
         for server in servers:
@@ -30,13 +31,26 @@ async def sync_list_config(db: Session, list_config: ListConfig):
             ms_client = MediaServerClient(server.url, server.api_key)
             
             try:
-                # Match items
+                # Concurrent matching with Semaphore and shared httpx.AsyncClient
                 matched_ids = []
-                for item in items:
-                    # Search by title and year
-                    emby_id = await ms_client.search_item(item["title"], item.get("year"), item.get("type"))
-                    if emby_id:
-                        matched_ids.append(emby_id)
+                sem = asyncio.Semaphore(10)
+                
+                async with httpx.AsyncClient(timeout=15.0) as http_client:
+                    async def match_item(it):
+                        async with sem:
+                            return await ms_client.search_item(
+                                title=it.get("title"),
+                                year=it.get("year"),
+                                item_type=it.get("type"),
+                                imdb_id=it.get("imdb_id"),
+                                tmdb_id=it.get("tmdb_id"),
+                                tvdb_id=it.get("tvdb_id"),
+                                show_title=it.get("show_title"),
+                                client=http_client
+                            )
+                    
+                    search_results = await asyncio.gather(*(match_item(it) for it in items))
+                    matched_ids = [mid for mid in search_results if mid]
 
                 if matched_ids:
                     if list_config.is_global:
@@ -46,7 +60,6 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                             await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=u.get("Id"))
                     else:
                         if list_config.target_username:
-                            # Find the user by name
                             users = await ms_client.get_users()
                             target_id = None
                             for u in users:
@@ -58,7 +71,6 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                             else:
                                 raise Exception(f"User {list_config.target_username} not found on {server.name}")
                         else:
-                            # Fallback to no user (admin)
                             await ms_client.create_or_update_playlist(list_config.name, matched_ids)
                             
                 results.append(f"{server.name}: {len(matched_ids)}/{len(items)} matched")
@@ -67,12 +79,22 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                 
         # Update log
         details_str = " | ".join(results) if results else "No servers configured"
-        log = SyncLog(list_config_id=list_config.id, status="success", details=details_str)
+        log = SyncLog(
+            list_config_id=list_config.id,
+            status="success",
+            details=details_str,
+            last_sync=datetime.datetime.utcnow()
+        )
         db.add(log)
         db.commit()
 
     except Exception as e:
-        log = SyncLog(list_config_id=list_config.id, status="error", details=str(e))
+        log = SyncLog(
+            list_config_id=list_config.id,
+            status="error",
+            details=str(e),
+            last_sync=datetime.datetime.utcnow()
+        )
         db.add(log)
         db.commit()
 

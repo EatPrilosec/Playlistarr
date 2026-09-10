@@ -22,11 +22,17 @@ DATABASE_URL = get_database_url()
 # Ensure directory for sqlite db exists
 if DATABASE_URL.startswith("sqlite:////"):
     db_file_path = DATABASE_URL[len("sqlite:////") - 1:]
-    os.makedirs(os.path.dirname(db_file_path), exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(db_file_path), exist_ok=True)
+    except Exception:
+        pass
 elif DATABASE_URL.startswith("sqlite:///"):
     db_file_path = DATABASE_URL[len("sqlite:///"):]
     if os.path.dirname(db_file_path):
-        os.makedirs(os.path.dirname(db_file_path), exist_ok=True)
+        try:
+            os.makedirs(os.path.dirname(db_file_path), exist_ok=True)
+        except Exception:
+            pass
 
 engine = create_engine(
     DATABASE_URL, connect_args={"check_same_thread": False}
