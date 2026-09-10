@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+import datetime
 from ..database import get_db
 from ..models import ListConfig, User
 from .auth import get_current_user
@@ -132,3 +134,56 @@ async def delete_playlist(
     db.delete(config)
     db.commit()
     return {"message": "Playlist deleted successfully"}
+
+@router.get("/{playlist_id}/export")
+async def export_playlist(
+    playlist_id: int,
+    format: str = "json",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    config = db.query(ListConfig).filter(ListConfig.id == playlist_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+        
+    if not current_user.is_admin and config.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to export this playlist")
+        
+    # Fetch provider items
+    items = []
+    try:
+        from ..services.providers.factory import get_provider
+        provider = get_provider(config.source_url, config.provider)
+        items = await provider.fetch_list()
+    except Exception:
+        items = []
+
+    if format.lower() == "m3u":
+        lines = ["#EXTM3U", f"#PLAYLIST:{config.name}"]
+        for item in items:
+            title = item.get("title", "Unknown")
+            year = item.get("year", "")
+            lines.append(f"#EXTINF:-1,{title} ({year})")
+            lines.append(f"#TITLE:{title}")
+        content = "\n".join(lines)
+        return Response(
+            content=content,
+            media_type="audio/x-mpegurl",
+            headers={"Content-Disposition": f'attachment; filename="{config.name}.m3u"'}
+        )
+
+    export_data = {
+        "name": config.name,
+        "provider": config.provider,
+        "source_url": config.source_url,
+        "is_global": config.is_global,
+        "sort_order": config.sort_order,
+        "target_username": config.target_username,
+        "exported_at": datetime.datetime.utcnow().isoformat(),
+        "item_count": len(items),
+        "items": items
+    }
+    return JSONResponse(
+        content=export_data,
+        headers={"Content-Disposition": f'attachment; filename="{config.name}.json"'}
+    )

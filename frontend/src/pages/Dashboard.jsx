@@ -1,19 +1,22 @@
 import { useState, useEffect } from 'react';
-import { Plus, Settings, RefreshCw, Trash2, ListVideo, Edit2 } from 'lucide-react';
+import { Plus, Settings, RefreshCw, Trash2, ListVideo, Edit2, Download } from 'lucide-react';
 
 export default function Dashboard() {
   const [playlists, setPlaylists] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [loading, setLoading] = useState(false);
   
+  const isAdmin = localStorage.getItem('isAdmin') === 'true';
+  const currentUsername = localStorage.getItem('username') || '';
+
   // Form State
   const [name, setName] = useState('');
   const [provider, setProvider] = useState('trakt');
   const [url, setUrl] = useState('');
   
   // New state for user selection
-  const [isGlobal, setIsGlobal] = useState(true);
-  const [targetUsername, setTargetUsername] = useState('');
+  const [isGlobal, setIsGlobal] = useState(isAdmin);
+  const [targetUsername, setTargetUsername] = useState(currentUsername);
   const [serverUsers, setServerUsers] = useState([]);
   const [editingId, setEditingId] = useState(null);
   
@@ -81,8 +84,8 @@ export default function Dashboard() {
         name,
         provider,
         source_url: url,
-        is_global: isGlobal,
-        target_username: isGlobal ? null : targetUsername
+        is_global: isAdmin ? isGlobal : false,
+        target_username: isAdmin ? (isGlobal ? null : targetUsername) : currentUsername
       };
 
       const resp = await fetch(endpoint, {
@@ -105,6 +108,26 @@ export default function Dashboard() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExport = async (p) => {
+    try {
+      const resp = await fetch(`/api/playlists/${p.id}/export?format=json`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `${p.name.replace(/\s+/g, '_')}_export.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    } catch (err) {
+      console.error('Export failed:', err);
     }
   };
 
@@ -192,25 +215,33 @@ export default function Dashboard() {
               <input type="url" value={url} onChange={e => setUrl(e.target.value)} required placeholder="https://trakt.tv/users/..." />
             </div>
             
-            <div className="input-group">
-              <label>Target Type</label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 'normal' }}>
-                  <input type="radio" checked={isGlobal} onChange={() => setIsGlobal(true)} style={{ width: 'auto', margin: 0 }} /> Global (All Users)
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 'normal' }}>
-                  <input type="radio" checked={!isGlobal} onChange={() => setIsGlobal(false)} style={{ width: 'auto', margin: 0 }} /> Specific User
-                </label>
-              </div>
-            </div>
+            {isAdmin ? (
+              <>
+                <div className="input-group">
+                  <label>Target Type</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 'normal' }}>
+                      <input type="radio" checked={isGlobal} onChange={() => setIsGlobal(true)} style={{ width: 'auto', margin: 0 }} /> Global (All Users)
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 'normal' }}>
+                      <input type="radio" checked={!isGlobal} onChange={() => setIsGlobal(false)} style={{ width: 'auto', margin: 0 }} /> Specific User
+                    </label>
+                  </div>
+                </div>
 
-            {!isGlobal && (
-              <div className="input-group">
-                <label>Select Emby/Jellyfin User</label>
-                <select value={targetUsername} onChange={e => setTargetUsername(e.target.value)} required>
-                  {serverUsers.length === 0 && <option value="">No users found</option>}
-                  {serverUsers.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
+                {!isGlobal && (
+                  <div className="input-group">
+                    <label>Select Emby/Jellyfin User</label>
+                    <select value={targetUsername} onChange={e => setTargetUsername(e.target.value)} required>
+                      {serverUsers.length === 0 && <option value="">No users found</option>}
+                      {serverUsers.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ padding: '0.75rem 1rem', borderRadius: '6px', background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary)', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+                This playlist will automatically sync to your media server user account (<strong>{currentUsername}</strong>).
               </div>
             )}
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '2rem' }}>
@@ -233,7 +264,11 @@ export default function Dashboard() {
           <div key={p.id} className="card glass-panel">
             <div className="card-title">
               {p.name}
-              {!p.is_global && <span style={{ fontSize: '0.7rem', background: 'var(--secondary)', marginLeft: '0.5rem', padding: '2px 6px', borderRadius: '4px' }}>{p.target_username}</span>}
+              {p.is_global ? (
+                <span style={{ fontSize: '0.7rem', background: 'var(--primary)', marginLeft: '0.5rem', padding: '2px 6px', borderRadius: '4px' }}>Global</span>
+              ) : (
+                <span style={{ fontSize: '0.7rem', background: 'var(--secondary)', marginLeft: '0.5rem', padding: '2px 6px', borderRadius: '4px' }}>{p.target_username}</span>
+              )}
             </div>
             <div className="card-subtitle">Source: {p.provider} • Provider URL: <a href={p.source_url} target="_blank" rel="noreferrer">Link</a></div>
             
@@ -257,7 +292,10 @@ export default function Dashboard() {
 
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                 <button className="btn btn-secondary" style={{ padding: '0.4rem', borderRadius: '6px' }} title="Sync Now" onClick={() => handleSync(p.id)}>
-                  <RefreshCw size={16} />
+                  <RefreshCw size={16} className={playlistStatuses[p.id]?.status === 'syncing' ? 'animate-spin' : ''} />
+                </button>
+                <button className="btn btn-secondary" style={{ padding: '0.4rem', borderRadius: '6px' }} title="Export Playlist (JSON)" onClick={() => handleExport(p)}>
+                  <Download size={16} />
                 </button>
                 <button className="btn btn-secondary" style={{ padding: '0.4rem', borderRadius: '6px' }} title="Edit" onClick={() => handleEdit(p)}>
                   <Edit2 size={16} />
