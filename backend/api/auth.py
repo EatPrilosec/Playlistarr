@@ -118,14 +118,6 @@ async def login(req: LoginRequest, db: Session = Depends(get_db)):
     token = jwt.encode(token_payload, SECRET_KEY, algorithm="HS256")
     return LoginResponse(token=token, is_admin=user.is_admin, username=user.username)
 
-@router.get("/me")
-async def get_me(current_user: User = Depends(get_current_user)):
-    return {
-        "id": current_user.id,
-        "username": current_user.username,
-        "is_admin": current_user.is_admin
-    }
-
 from fastapi.security import OAuth2PasswordBearer
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -143,3 +135,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if not user:
         raise HTTPException(status_code=401)
     return user
+
+@router.get("/me")
+async def get_me(current_user: User = Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "is_admin": current_user.is_admin
+    }
