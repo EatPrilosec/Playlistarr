@@ -15,6 +15,19 @@ class TraktProvider(BaseProvider):
         username = match.group(1)
         list_id = match.group(2)
         
+        # Check for user authenticated Trakt access token
+        access_token = None
+        try:
+            from ...database import SessionLocal
+            from ...models import AppSetting
+            db = SessionLocal()
+            setting = db.query(AppSetting).filter(AppSetting.key == "trakt_access_token").first()
+            if setting and setting.value:
+                access_token = setting.value
+            db.close()
+        except Exception:
+            pass
+
         client_id = os.getenv("TRAKT_CLIENT_ID", "201dc70c5ec6af530f12f079ea1922733f6e1085ad7b02f36d8e011b75bcea7d")
         headers = {
             "Content-Type": "application/json",
@@ -22,6 +35,8 @@ class TraktProvider(BaseProvider):
             "trakt-api-key": client_id,
             "User-Agent": "Playlistarr/1.0"
         }
+        if access_token:
+            headers["Authorization"] = f"Bearer {access_token}"
         
         items = []
         page = 1

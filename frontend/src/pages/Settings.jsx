@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Server, Plus, Trash2, Edit2, Clock } from 'lucide-react';
+import { Server, Plus, Trash2, Edit2, Clock, Tv, ExternalLink, Copy, Check, RefreshCw, Unlink } from 'lucide-react';
 
 export default function Settings() {
   const [servers, setServers] = useState([]);
@@ -17,6 +17,13 @@ export default function Settings() {
   // Sync Settings State
   const [syncInterval, setSyncInterval] = useState(1);
   const [savingInterval, setSavingInterval] = useState(false);
+
+  // Trakt State
+  const [traktStatus, setTraktStatus] = useState({ connected: false, username: null });
+  const [deviceAuth, setDeviceAuth] = useState(null);
+  const [traktLoading, setTraktLoading] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+  const [pollStatus, setPollStatus] = useState('');
 
   const fetchServers = async () => {
     try {
@@ -43,9 +50,94 @@ export default function Settings() {
     }
   };
 
+  const fetchTraktStatus = async () => {
+    try {
+      const resp = await fetch('/api/settings/trakt/status', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setTraktStatus(data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     fetchServers();
+    fetchTraktStatus();
   }, []);
+
+  // Poll Trakt Device Token when deviceAuth is active
+  useEffect(() => {
+    if (!deviceAuth?.device_code) return;
+    
+    const interval = Math.max((deviceAuth.interval || 5), 5) * 1000;
+    const timer = setInterval(async () => {
+      try {
+        const resp = await fetch('/api/settings/trakt/poll-token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify({ device_code: deviceAuth.device_code })
+        });
+        const data = await resp.json();
+        if (data.status === 'authorized') {
+          setDeviceAuth(null);
+          setTraktStatus({ connected: true, username: data.username });
+          setPollStatus('');
+          clearInterval(timer);
+        } else if (data.status === 'expired') {
+          setPollStatus('Activation code expired. Please request a new code.');
+          clearInterval(timer);
+        }
+      } catch (err) {
+        console.error('Trakt polling error:', err);
+      }
+    }, interval);
+
+    return () => clearInterval(timer);
+  }, [deviceAuth]);
+
+  const handleStartTraktAuth = async () => {
+    setTraktLoading(true);
+    setPollStatus('');
+    try {
+      const resp = await fetch('/api/settings/trakt/device-code', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.detail || 'Failed to request device code');
+      }
+      const data = await resp.json();
+      setDeviceAuth(data);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setTraktLoading(false);
+    }
+  };
+
+  const handleDisconnectTrakt = async () => {
+    if (!window.confirm('Are you sure you want to disconnect your Trakt account?')) return;
+    try {
+      const resp = await fetch('/api/settings/trakt/disconnect', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (resp.ok) {
+        setTraktStatus({ connected: false, username: null });
+        setDeviceAuth(null);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const handleTest = async () => {
     if (!url || !apiKey) {
@@ -112,10 +204,10 @@ export default function Settings() {
     setApiKey(s.api_key || '');
     setTestResult(null);
     setShowAddModal(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDelete = async (id) => {
+    if (!confirm('Are you sure you want to delete this media server?')) return;
     try {
       await fetch(`/api/settings/servers/${id}`, {
         method: 'DELETE',
@@ -133,14 +225,16 @@ export default function Settings() {
     try {
       await fetch('/api/settings/sync-interval', {
         method: 'PUT',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify({ interval_hours: parseInt(syncInterval) })
       });
+      alert('Sync interval saved successfully!');
     } catch (err) {
       console.error(err);
+      alert('Failed to save sync interval');
     } finally {
       setSavingInterval(false);
     }
@@ -148,6 +242,7 @@ export default function Settings() {
 
   return (
     <div className="animate-fade-in">
+      {/* Media Servers Section */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <div>
           <h2 className="page-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -236,6 +331,151 @@ export default function Settings() {
         ))}
       </div>
 
+      {/* Trakt Account Section */}
+      <div style={{ marginTop: '4rem', marginBottom: '2rem' }}>
+        <h2 className="page-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Tv color="var(--primary)" /> Trakt Account
+        </h2>
+        <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+          Connect your Trakt account via browser device code activation to sync your public and private lists.
+        </p>
+      </div>
+
+      <div className="glass-panel" style={{ padding: '2rem', maxWidth: '650px' }}>
+        {traktStatus.connected ? (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '50%',
+                  background: 'rgba(16, 185, 129, 0.15)',
+                  border: '1px solid rgba(16, 185, 129, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Check color="var(--success)" size={24} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '1.1rem', color: '#fff' }}>
+                    Connected to Trakt
+                  </div>
+                  <div style={{ color: 'var(--primary)', fontSize: '0.9rem', marginTop: '0.2rem' }}>
+                    @{traktStatus.username}
+                  </div>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                style={{ color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                onClick={handleDisconnectTrakt}
+              >
+                <Unlink size={16} style={{ marginRight: '0.5rem' }} /> Disconnect
+              </button>
+            </div>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '1.5rem', marginBottom: 0 }}>
+              Your Trakt account is active and authorized. Private and personal lists will be fetched using your account credentials.
+            </p>
+          </div>
+        ) : (
+          <div>
+            {!deviceAuth ? (
+              <div>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', fontSize: '0.95rem' }}>
+                  Authenticate Playlistarr with Trakt in your web browser without entering your password.
+                </p>
+                <button 
+                  type="button" 
+                  className="btn btn-primary" 
+                  onClick={handleStartTraktAuth} 
+                  disabled={traktLoading}
+                >
+                  <Tv size={18} style={{ marginRight: '0.5rem' }} />
+                  {traktLoading ? 'Requesting Code...' : 'Connect Trakt (Device Code)'}
+                </button>
+              </div>
+            ) : (
+              <div className="animate-fade-in">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#fff' }}>Authorize on Trakt</h3>
+                  <button 
+                    type="button" 
+                    className="btn btn-secondary" 
+                    style={{ padding: '0.3rem 0.8rem', fontSize: '0.85rem' }}
+                    onClick={() => setDeviceAuth(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                <div style={{ background: 'rgba(0, 0, 0, 0.25)', borderRadius: '12px', padding: '1.5rem', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step 1</span>
+                    <div style={{ marginTop: '0.3rem' }}>
+                      <a 
+                        href={deviceAuth.verification_url || "https://auth.trakt.tv/activate"} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="btn btn-secondary"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none', color: 'var(--primary)' }}
+                      >
+                        Open {deviceAuth.verification_url || "trakt.tv/activate"} <ExternalLink size={16} />
+                      </a>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '1.5rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step 2: Enter this code</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
+                      <span style={{
+                        fontFamily: 'monospace',
+                        fontSize: '1.75rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.15em',
+                        background: 'rgba(99, 102, 241, 0.15)',
+                        border: '1px solid var(--primary)',
+                        padding: '0.5rem 1.25rem',
+                        borderRadius: '8px',
+                        color: '#fff'
+                      }}>
+                        {deviceAuth.user_code}
+                      </span>
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          navigator.clipboard.writeText(deviceAuth.user_code);
+                          setCopySuccess(true);
+                          setTimeout(() => setCopySuccess(false), 2000);
+                        }}
+                        title="Copy Code"
+                      >
+                        {copySuccess ? <Check size={18} color="var(--success)" /> : <Copy size={18} />}
+                        <span style={{ marginLeft: '0.4rem', fontSize: '0.85rem' }}>{copySuccess ? 'Copied!' : 'Copy'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                    <RefreshCw size={16} className="animate-spin" />
+                    <span>Waiting for authorization on Trakt...</span>
+                  </div>
+                  {pollStatus && (
+                    <div style={{ marginTop: '0.75rem', color: 'var(--danger)', fontSize: '0.85rem' }}>
+                      {pollStatus}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Sync Settings Section */}
       <div style={{ marginTop: '4rem', marginBottom: '2rem' }}>
         <h2 className="page-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Clock color="var(--primary)" /> Sync Settings

@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+import os
+import httpx
+import datetime
 from ..database import get_db
-from ..models import Server, User
+from ..models import Server, User, AppSetting
 from .auth import get_current_user
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -129,3 +132,122 @@ async def delete_server(server_id: int, db: Session = Depends(get_db), current_u
     db.delete(server)
     db.commit()
     return {"status": "ok"}
+
+# --- Trakt Device Code OAuth Endpoints ---
+
+class PollTokenRequest(BaseModel):
+    device_code: str
+
+@router.get("/trakt/status")
+async def get_trakt_status(db: Session = Depends(get_db)):
+    token_setting = db.query(AppSetting).filter(AppSetting.key == "trakt_access_token").first()
+    username_setting = db.query(AppSetting).filter(AppSetting.key == "trakt_username").first()
+    is_connected = bool(token_setting and token_setting.value)
+    return {
+        "connected": is_connected,
+        "username": username_setting.value if (is_connected and username_setting) else None
+    }
+
+@router.post("/trakt/device-code")
+async def create_trakt_device_code(current_user: User = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    client_id = os.getenv("TRAKT_CLIENT_ID", "201dc70c5ec6af530f12f079ea1922733f6e1085ad7b02f36d8e011b75bcea7d")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            resp = await client.post(
+                "https://api.trakt.tv/oauth/device/code",
+                json={"client_id": client_id},
+                headers={"Content-Type": "application/json"}
+            )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail=f"Trakt API error: {resp.text[:100]}")
+            data = resp.json()
+            return {
+                "device_code": data["device_code"],
+                "user_code": data["user_code"],
+                "verification_url": data.get("verification_url", "https://auth.trakt.tv/activate"),
+                "expires_in": data.get("expires_in", 600),
+                "interval": data.get("interval", 5)
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/trakt/poll-token")
+async def poll_trakt_token(req: PollTokenRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    client_id = os.getenv("TRAKT_CLIENT_ID", "201dc70c5ec6af530f12f079ea1922733f6e1085ad7b02f36d8e011b75bcea7d")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            resp = await client.post(
+                "https://api.trakt.tv/oauth/device/token",
+                json={"client_id": client_id, "code": req.device_code},
+                headers={"Content-Type": "application/json"}
+            )
+            if resp.status_code == 200:
+                token_data = resp.json()
+                access_token = token_data.get("access_token")
+                refresh_token = token_data.get("refresh_token")
+                expires_in = token_data.get("expires_in", 7776000)
+                
+                expires_at = datetime.datetime.utcnow() + datetime.timedelta(seconds=expires_in)
+                
+                # Fetch profile for username
+                username = "TraktUser"
+                profile_resp = await client.get(
+                    "https://api.trakt.tv/users/me",
+                    headers={
+                        "Content-Type": "application/json",
+                        "trakt-api-version": "2",
+                        "trakt-api-key": client_id,
+                        "Authorization": f"Bearer {access_token}"
+                    }
+                )
+                if profile_resp.status_code == 200:
+                    username = profile_resp.json().get("username") or username
+                    
+                # Save to AppSetting
+                settings_to_update = {
+                    "trakt_access_token": access_token,
+                    "trakt_refresh_token": refresh_token,
+                    "trakt_username": username,
+                    "trakt_token_expires_at": expires_at.isoformat()
+                }
+                for k, v in settings_to_update.items():
+                    s = db.query(AppSetting).filter(AppSetting.key == k).first()
+                    if not s:
+                        s = AppSetting(key=k, value=str(v))
+                        db.add(s)
+                    else:
+                        s.value = str(v)
+                db.commit()
+                return {"status": "authorized", "username": username}
+            elif resp.status_code == 400:
+                return {"status": "pending"}
+            elif resp.status_code in [404, 409, 410, 418]:
+                return {"status": "expired", "detail": "Activation code expired or denied"}
+            elif resp.status_code == 429:
+                return {"status": "slow_down"}
+            else:
+                return {"status": "error", "detail": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
+
+@router.post("/trakt/disconnect")
+async def disconnect_trakt(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    keys = ["trakt_access_token", "trakt_refresh_token", "trakt_username", "trakt_token_expires_at"]
+    for k in keys:
+        s = db.query(AppSetting).filter(AppSetting.key == k).first()
+        if s:
+            db.delete(s)
+    db.commit()
+    return {"status": "ok", "connected": False}
+
