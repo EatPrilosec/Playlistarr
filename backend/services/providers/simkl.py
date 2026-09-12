@@ -112,8 +112,10 @@ class SIMKLProvider(BaseProvider):
         data = resp.json()
         if isinstance(data, dict) and data.get("error") == "premium_only":
             raise Exception(
-                "SIMKL custom lists via API require a Simkl Pro/VIP account or connected user token. "
-                "Please connect your SIMKL account in Settings or use SIMKL Discovery/Watchlist lists."
+                "SIMKL custom lists are restricted by SIMKL to paid Pro/VIP members only ('premium_only'). "
+                "Free SIMKL accounts cannot access custom lists via API. "
+                "To sync this list without a paid SIMKL account, use Trakt, Letterboxd, mdblist, or IMDb, "
+                "or use SIMKL Discovery lists (e.g. https://simkl.com/movies/trending)."
             )
 
         # Parse custom list items

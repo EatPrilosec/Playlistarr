@@ -275,11 +275,16 @@ export default function Dashboard() {
                   provider === 'trakt' ? 'https://trakt.tv/users/username/lists/list-name' :
                   provider === 'imdb' ? 'https://www.imdb.com/list/ls055592025/ or https://www.imdb.com/chart/top' :
                   provider === 'mdblist' ? 'https://mdblist.com/lists/official/movies/justwatch-streaming-charts' :
-                  provider === 'simkl' ? 'https://simkl.com/movies/trending or https://simkl.com/5742139/list/6837' :
+                  provider === 'simkl' ? 'https://simkl.com/movies/trending (or https://simkl.com/user/list/id for Pro/VIP)' :
                   provider === 'letterboxd' ? 'https://letterboxd.com/username/list/list-name/' :
                   'https://...'
                 } 
               />
+              {provider === 'simkl' && (
+                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.4rem', lineHeight: '1.4' }}>
+                  <span style={{ color: '#f59e0b', fontWeight: 600 }}>Note:</span> SIMKL Discovery lists (e.g. <code>/movies/trending</code>, <code>/tv/best</code>) work free out-of-the-box. Custom lists (<code>/list/...</code>) require a paid Simkl Pro/VIP subscription on SIMKL.
+                </div>
+              )}
             </div>
 
             {/* Artwork Section */}
