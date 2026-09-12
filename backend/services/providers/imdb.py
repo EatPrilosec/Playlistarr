@@ -79,6 +79,20 @@ class IMDbProvider(BaseProvider):
                 list_id = list_match.group(1)
                 return await self._fetch_user_list(client, headers, list_id)
 
+            # 4. Check for search/title URLs (e.g. /search/title/?groups=top_100)
+            if "search/title" in clean_url:
+                if "top_100" in clean_url:
+                    items = await self._fetch_chart(client, headers, "TOP_RATED_MOVIES")
+                    return items[:100]
+                elif "top_250" in clean_url or "top" in clean_url:
+                    return await self._fetch_chart(client, headers, "TOP_RATED_MOVIES")
+                elif "tv" in clean_url or "show" in clean_url:
+                    return await self._fetch_chart(client, headers, "TOP_RATED_TV_SHOWS")
+                elif "popular" in clean_url or "moviemeter" in clean_url:
+                    return await self._fetch_chart(client, headers, "MOST_POPULAR_MOVIES")
+                else:
+                    return await self._fetch_chart(client, headers, "TOP_RATED_MOVIES")
+
             raise Exception(f"Unrecognized IMDb list URL: {clean_url}. Expected format: https://www.imdb.com/list/ls... or https://www.imdb.com/chart/...")
 
     async def _fetch_chart(self, client: httpx.AsyncClient, headers: dict, chart_type: str) -> list[dict]:
