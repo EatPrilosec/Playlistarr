@@ -6,7 +6,7 @@
 [![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white)](https://paypal.me/DVDIsDead)
 
-**Playlistarr** is a modern, standalone web application and background synchronization engine that mirrors movie & TV playlists from **Trakt**, **IMDb**, **Letterboxd**, **SIMKL**, **mdblist**, and **Serializd** directly into your **Emby** and **Jellyfin** media servers.
+**Playlistarr** is a modern, standalone web application and background synchronization engine that mirrors movie & TV playlists from **Trakt**, **IMDb**, **Letterboxd**, **SIMKL**, and **mdblist** directly into your **Emby** and **Jellyfin** media servers.
 
 It also integrates seamlessly with **Sonarr** and **Radarr** to automatically identify missing playlist items in your library and send them for automated downloading with 1 click.
 
@@ -20,7 +20,6 @@ It also integrates seamlessly with **Sonarr** and **Radarr** to automatically id
   - **Letterboxd**: Ranked lists, film diaries, and curated collections.
   - **SIMKL**: User custom lists, watchlist, and trending feeds with built-in Cloudflare challenge handling and account connectivity.
   - **mdblist**: Dynamic smart filters and curated multi-source lists.
-  - **Serializd**: TV show journals and season/series watch orders.
 
 - **🤖 Sonarr & Radarr Media Automation**:
   - Connect your existing **Radarr** and **Sonarr** instances in Settings with live connectivity testing.
@@ -60,7 +59,6 @@ flowchart TD
         Letterboxd["Letterboxd"]
         SIMKL["SIMKL (Account / Lists)"]
         MDBList["mdblist.com"]
-        Serializd["Serializd"]
     end
 
     subgraph Core [Playlistarr Engine]
