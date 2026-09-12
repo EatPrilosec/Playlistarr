@@ -4,6 +4,52 @@ import re
 def _clean_str(s: str) -> str:
     return re.sub(r'[^a-z0-9]', '', (s or '').lower())
 
+def _generate_search_queries(title: str, item_type: str = None) -> list[str]:
+    if not title:
+        return []
+    queries = []
+    seen = set()
+
+    def add(q: str):
+        q_clean = q.strip()
+        if q_clean and q_clean.lower() not in seen:
+            seen.add(q_clean.lower())
+            queries.append(q_clean)
+
+    add(title)
+
+    if "volume" in title.lower():
+        add(re.sub(r'volume', 'Vol.', title, flags=re.IGNORECASE))
+    if "." in title:
+        add(title.replace(".", ""))
+    elif len(title) <= 5 and title.isupper():
+        add(".".join(list(title)) + ".")
+
+    # Subtitle splitting on ':' (e.g. "Star Wars: Episode IV - A New Hope" -> "Star Wars", "A New Hope")
+    if ":" in title:
+        parts = title.split(":", 1)
+        add(parts[0])
+        add(parts[1])
+        if "-" in parts[1]:
+            subparts = parts[1].split("-", 1)
+            add(subparts[0])
+            add(subparts[1])
+
+    # Subtitle splitting on ' - ' (e.g. "Star Wars - The Empire Strikes Back")
+    if " - " in title:
+        parts = title.split(" - ", 1)
+        add(parts[0])
+        add(parts[1])
+
+    # Stylized numbers (e.g. "Seven" <-> "Se7en")
+    t_lower = title.lower()
+    if "seven" in t_lower:
+        add(re.sub(r'\bseven\b', 'se7en', title, flags=re.IGNORECASE))
+    elif "se7en" in t_lower:
+        add(re.sub(r'\bse7en\b', 'seven', title, flags=re.IGNORECASE))
+
+    return queries
+
 class MediaServerClient:
     def __init__(self, server_url: str, api_key: str, server_type: str = "emby"):
         self.server_url = server_url.rstrip("/")
@@ -40,7 +86,8 @@ class MediaServerClient:
                         params = {
                             "Recursive": "true",
                             "AnyProviderIdEquals": f"{pid_key}.{pid_val}",
-                            "IncludeItemTypes": "Movie,Series,Season,Episode,Video"
+                            "IncludeItemTypes": "Movie,Series,Season,Episode,Video",
+                            "fields": "ProviderIds,SeriesName,Path,ProductionYear,Name"
                         }
                         try:
                             resp = await client.get(url, params=params, headers=self.headers)
@@ -51,7 +98,7 @@ class MediaServerClient:
                         except Exception:
                             pass
 
-            # 2. Search by SearchTerm with candidate provider IDs and title/path filtering (for Jellyfin and Emby fallback)
+            # 2. Search by SearchTerm with candidate provider IDs and title/path filtering
             include_types = "Movie,Series,Season,Episode"
             if item_type:
                 itype = item_type.lower()
@@ -64,18 +111,7 @@ class MediaServerClient:
                 elif itype == "episode":
                     include_types = "Episode"
 
-            search_queries = []
-            if title:
-                search_queries.append(title)
-                if "volume" in title.lower():
-                    search_queries.append(re.sub(r'volume', 'Vol.', title, flags=re.IGNORECASE))
-                if "." in title:
-                    search_queries.append(title.replace(".", ""))
-                elif len(title) <= 5 and title.isupper():
-                    search_queries.append(".".join(list(title)) + ".")
-            if item_type and item_type.lower() == "episode" and show_title and show_title not in search_queries:
-                search_queries.append(show_title)
-
+            search_queries = _generate_search_queries(title, item_type)
             clean_t = _clean_str(title)
 
             for sq in search_queries:
@@ -84,7 +120,7 @@ class MediaServerClient:
                     "SearchTerm": sq,
                     "Recursive": "true",
                     "IncludeItemTypes": include_types,
-                    "fields": "ProviderIds,SeriesName,Path"
+                    "fields": "ProviderIds,SeriesName,Path,ProductionYear,Name"
                 }
                 try:
                     resp = await client.get(url, params=params, headers=self.headers)
@@ -101,18 +137,58 @@ class MediaServerClient:
                             if tvdb_id and str(pids.get("Tvdb")) == str(tvdb_id):
                                 return it.get("Id")
 
-                        # 2b. Match by candidate Name / Path / SeriesName
+                        # 2b. Match by candidate Name / Path / SeriesName WITH STRICT YEAR CHECK
                         for it in items:
                             if item_type and item_type.lower() == "episode" and show_title:
                                 s_name = it.get("SeriesName", "")
                                 if s_name and _clean_str(s_name) != _clean_str(show_title):
                                     continue
+
+                            it_year = it.get("ProductionYear")
+                            if year and it_year and abs(it_year - year) > 1:
+                                continue
+
                             it_name = _clean_str(it.get("Name", ""))
                             it_path = _clean_str(it.get("Path", ""))
-                            if it_name == clean_t or (clean_t and clean_t in it_path) or (clean_t and it_name and clean_t in it_name):
-                                if year and it.get("ProductionYear") and abs(it["ProductionYear"] - year) > 1:
-                                    continue
-                                return it.get("Id")
+
+                            # Exact title match
+                            if it_name == clean_t:
+                                if not year or not it_year or abs(it_year - year) <= 1:
+                                    return it.get("Id")
+
+                            # Substring match requires minimum length (>= 4 chars) and strict year confirmation
+                            if len(clean_t) >= 4 and ((clean_t in it_path) or (clean_t in it_name)):
+                                if year and it_year and abs(it_year - year) <= 1:
+                                    return it.get("Id")
+                except Exception:
+                    pass
+
+            # 3. For TV episodes still unmatched, query the show's episodes directly
+            if item_type and item_type.lower() == "episode" and show_title:
+                try:
+                    s_resp = await client.get(f"{self.server_url}/Items", params={
+                        "SearchTerm": show_title,
+                        "Recursive": "true",
+                        "IncludeItemTypes": "Series",
+                        "fields": "ProviderIds"
+                    }, headers=self.headers)
+                    if s_resp.status_code == 200:
+                        series_items = s_resp.json().get("Items", [])
+                        if series_items:
+                            series_id = series_items[0].get("Id")
+                            ep_resp = await client.get(f"{self.server_url}/Shows/{series_id}/Episodes", params={
+                                "fields": "ProviderIds,Name,Path"
+                            }, headers=self.headers)
+                            if ep_resp.status_code == 200:
+                                eps = ep_resp.json().get("Items", [])
+                                for ep in eps:
+                                    pids = ep.get("ProviderIds", {}) or {}
+                                    if tvdb_id and str(pids.get("Tvdb")) == str(tvdb_id):
+                                        return ep.get("Id")
+                                    if imdb_id and pids.get("Imdb") == imdb_id:
+                                        return ep.get("Id")
+                                    if tmdb_id and str(pids.get("Tmdb")) == str(tmdb_id):
+                                        return ep.get("Id")
                 except Exception:
                     pass
 
