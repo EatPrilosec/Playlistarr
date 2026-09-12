@@ -62,24 +62,31 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                         "Banner": list_config.banner_url
                     }
                     if list_config.is_global:
-                        # Push to all users on this server
+                        # Push to all users on this server as public/global playlists
                         users = await ms_client.get_users()
                         for u in users:
-                            await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=u.get("Id"), images=images)
+                            await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=u.get("Id"), images=images, is_public=True)
                     else:
                         if list_config.target_username:
                             users = await ms_client.get_users()
                             target_id = None
                             for u in users:
-                                if u.get("Name", "").lower() == list_config.target_username.lower():
+                                if (u.get("Name") or "").lower() == list_config.target_username.lower():
                                     target_id = u.get("Id")
                                     break
                             if target_id:
-                                await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=target_id, images=images)
+                                # For servers with per-user libraries (e.g. Emby), ensure no other users retain this playlist
+                                for u in users:
+                                    if u.get("Id") != target_id:
+                                        try:
+                                            await ms_client.delete_playlist(list_config.name, user_id=u.get("Id"))
+                                        except Exception:
+                                            pass
+                                await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=target_id, images=images, is_public=False)
                             else:
                                 raise Exception(f"User {list_config.target_username} not found on {server.name}")
                         else:
-                            await ms_client.create_or_update_playlist(list_config.name, matched_ids, images=images)
+                            await ms_client.create_or_update_playlist(list_config.name, matched_ids, images=images, is_public=False)
                             
                 results.append(f"{server.name}: {len(matched_ids)}/{len(items)} matched")
             except Exception as se:

@@ -207,7 +207,7 @@ class MediaServerClient:
                 return resp.json()
             raise Exception(f"Failed to get users (HTTP {resp.status_code}): {resp.text}")
 
-    async def create_or_update_playlist(self, name: str, item_ids: list[str], user_id: str = None, images: dict = None):
+    async def create_or_update_playlist(self, name: str, item_ids: list[str], user_id: str = None, images: dict = None, is_public: bool = True):
         """Creates a playlist or updates an existing one, and sets custom artwork if provided"""
         if not user_id:
             users = await self.get_users()
@@ -218,6 +218,12 @@ class MediaServerClient:
                 
         # First check if playlist exists for this user
         url = f"{self.server_url}/Users/{user_id}/Items" if user_id else f"{self.server_url}/Items"
+        check_urls = [url]
+        if self.server_type == "jellyfin" or not user_id:
+            global_url = f"{self.server_url}/Items"
+            if global_url not in check_urls:
+                check_urls.append(global_url)
+
         params = {
             "IncludeItemTypes": "Playlist",
             "Recursive": "true",
@@ -226,12 +232,19 @@ class MediaServerClient:
             
         existing_ids = []
         async with httpx.AsyncClient(headers=self.headers, timeout=15.0) as client:
-            resp = await client.get(url, params=params)
-            if resp.status_code == 200:
-                items = resp.json().get("Items", [])
-                for p in items:
-                    if (p.get("Name") or "").strip().lower() == name.strip().lower() and p.get("Id"):
-                        existing_ids.append(p.get("Id"))
+            seen_existing = set()
+            for cur_url in check_urls:
+                try:
+                    resp = await client.get(cur_url, params=params)
+                    if resp.status_code == 200:
+                        items = resp.json().get("Items", [])
+                        for p in items:
+                            pid = p.get("Id")
+                            if (p.get("Name") or "").strip().lower() == name.strip().lower() and pid and pid not in seen_existing:
+                                seen_existing.add(pid)
+                                existing_ids.append(pid)
+                except Exception as e:
+                    print(f"Error checking existing playlists at {cur_url}: {e}")
         
             # If playlist(s) exist, remove them to recreate fresh with matched items
             for old_id in existing_ids:
@@ -249,8 +262,18 @@ class MediaServerClient:
             # If items count <= 100, pass Ids directly to create
             if item_ids and len(item_ids) <= 100:
                 create_params["Ids"] = ",".join(item_ids)
+
+            create_body = {
+                "Name": name,
+                "UserId": user_id,
+                "IsPublic": is_public
+            }
+            if not is_public and user_id:
+                create_body["Users"] = [
+                    {"UserId": user_id, "CanEdit": True}
+                ]
                 
-            resp = await client.post(create_url, json={"Name": name}, params=create_params)
+            resp = await client.post(create_url, json=create_body, params=create_params)
             if resp.status_code != 200:
                 raise Exception(f"Failed to create playlist {name}: {resp.status_code} {resp.text}")
                 
