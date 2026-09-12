@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Server, Plus, Trash2, Edit2, Clock, Tv, ExternalLink, Copy, Check, RefreshCw, Unlink } from 'lucide-react';
+import { 
+  Server, Plus, Trash2, Edit2, Clock, Tv, ExternalLink, Copy, Check, 
+  RefreshCw, Unlink, Film, Download, CheckCircle2, AlertCircle, Loader2 
+} from 'lucide-react';
 
 export default function Settings() {
   const [servers, setServers] = useState([]);
@@ -31,6 +34,32 @@ export default function Settings() {
   const [simklLoading, setSimklLoading] = useState(false);
   const [simklCopySuccess, setSimklCopySuccess] = useState(false);
   const [simklPollStatus, setSimklPollStatus] = useState('');
+
+  // Radarr State
+  const [radarrConfig, setRadarrConfig] = useState({ configured: false, url: '', api_key: '', quality_profile_id: null, root_folder_path: '', search_on_add: true });
+  const [radarrUrl, setRadarrUrl] = useState('');
+  const [radarrApiKey, setRadarrApiKey] = useState('');
+  const [radarrProfileId, setRadarrProfileId] = useState('');
+  const [radarrFolderPath, setRadarrFolderPath] = useState('');
+  const [radarrSearchOnAdd, setRadarrSearchOnAdd] = useState(true);
+  const [radarrProfiles, setRadarrProfiles] = useState([]);
+  const [radarrFolders, setRadarrFolders] = useState([]);
+  const [radarrTesting, setRadarrTesting] = useState(false);
+  const [radarrTestResult, setRadarrTestResult] = useState(null);
+  const [radarrSaving, setRadarrSaving] = useState(false);
+
+  // Sonarr State
+  const [sonarrConfig, setSonarrConfig] = useState({ configured: false, url: '', api_key: '', quality_profile_id: null, root_folder_path: '', search_on_add: true });
+  const [sonarrUrl, setSonarrUrl] = useState('');
+  const [sonarrApiKey, setSonarrApiKey] = useState('');
+  const [sonarrProfileId, setSonarrProfileId] = useState('');
+  const [sonarrFolderPath, setSonarrFolderPath] = useState('');
+  const [sonarrSearchOnAdd, setSonarrSearchOnAdd] = useState(true);
+  const [sonarrProfiles, setSonarrProfiles] = useState([]);
+  const [sonarrFolders, setSonarrFolders] = useState([]);
+  const [sonarrTesting, setSonarrTesting] = useState(false);
+  const [sonarrTestResult, setSonarrTestResult] = useState(null);
+  const [sonarrSaving, setSonarrSaving] = useState(false);
 
   const fetchServers = async () => {
     try {
@@ -89,7 +118,196 @@ export default function Settings() {
     fetchServers();
     fetchTraktStatus();
     fetchSimklStatus();
+    fetchArrSettings();
   }, []);
+
+  const fetchArrSettings = async () => {
+    try {
+      const resp = await fetch('/api/settings/arr', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.radarr) {
+          setRadarrConfig(data.radarr);
+          setRadarrUrl(data.radarr.url || '');
+          setRadarrApiKey(data.radarr.api_key || '');
+          setRadarrProfileId(data.radarr.quality_profile_id || '');
+          setRadarrFolderPath(data.radarr.root_folder_path || '');
+          setRadarrSearchOnAdd(data.radarr.search_on_add !== false);
+          if (data.radarr.configured) {
+            handleTestArr('radarr', data.radarr.url, data.radarr.api_key, false);
+          }
+        }
+        if (data.sonarr) {
+          setSonarrConfig(data.sonarr);
+          setSonarrUrl(data.sonarr.url || '');
+          setSonarrApiKey(data.sonarr.api_key || '');
+          setSonarrProfileId(data.sonarr.quality_profile_id || '');
+          setSonarrFolderPath(data.sonarr.root_folder_path || '');
+          setSonarrSearchOnAdd(data.sonarr.search_on_add !== false);
+          if (data.sonarr.configured) {
+            handleTestArr('sonarr', data.sonarr.url, data.sonarr.api_key, false);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleTestArr = async (type, testUrl = null, testKey = null, setAlertMsg = true) => {
+    const isRadarr = type === 'radarr';
+    const targetUrl = testUrl ?? (isRadarr ? radarrUrl : sonarrUrl);
+    const targetKey = testKey ?? (isRadarr ? radarrApiKey : sonarrApiKey);
+
+    if (!targetUrl || !targetKey) {
+      if (setAlertMsg) {
+        if (isRadarr) setRadarrTestResult({ ok: false, msg: 'URL and API Key are required to test' });
+        else setSonarrTestResult({ ok: false, msg: 'URL and API Key are required to test' });
+      }
+      return;
+    }
+
+    if (isRadarr) setRadarrTesting(true);
+    else setSonarrTesting(true);
+
+    try {
+      const resp = await fetch('/api/settings/arr/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ type, url: targetUrl, api_key: targetKey })
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        if (isRadarr) {
+          setRadarrProfiles(data.quality_profiles || []);
+          setRadarrFolders(data.root_folders || []);
+          if (!radarrProfileId && data.quality_profiles?.length) {
+            setRadarrProfileId(data.quality_profiles[0].id);
+          }
+          if (!radarrFolderPath && data.root_folders?.length) {
+            setRadarrFolderPath(data.root_folders[0].path);
+          }
+          if (setAlertMsg) setRadarrTestResult({ ok: true, msg: `Connected to ${data.app_name} v${data.version}!` });
+        } else {
+          setSonarrProfiles(data.quality_profiles || []);
+          setSonarrFolders(data.root_folders || []);
+          if (!sonarrProfileId && data.quality_profiles?.length) {
+            setSonarrProfileId(data.quality_profiles[0].id);
+          }
+          if (!sonarrFolderPath && data.root_folders?.length) {
+            setSonarrFolderPath(data.root_folders[0].path);
+          }
+          if (setAlertMsg) setSonarrTestResult({ ok: true, msg: `Connected to ${data.app_name} v${data.version}!` });
+        }
+      } else {
+        if (setAlertMsg) {
+          if (isRadarr) setRadarrTestResult({ ok: false, msg: data.detail || 'Connection failed' });
+          else setSonarrTestResult({ ok: false, msg: data.detail || 'Connection failed' });
+        }
+      }
+    } catch (e) {
+      if (setAlertMsg) {
+        if (isRadarr) setRadarrTestResult({ ok: false, msg: e.message || 'Connection error' });
+        else setSonarrTestResult({ ok: false, msg: e.message || 'Connection error' });
+      }
+    } finally {
+      if (isRadarr) setRadarrTesting(false);
+      else setSonarrTesting(false);
+    }
+  };
+
+  const handleSaveArr = async (type) => {
+    const isRadarr = type === 'radarr';
+    if (isRadarr) setRadarrSaving(true);
+    else setSonarrSaving(true);
+
+    try {
+      const payload = isRadarr ? {
+        type: 'radarr',
+        url: radarrUrl,
+        api_key: radarrApiKey,
+        quality_profile_id: radarrProfileId ? parseInt(radarrProfileId) : null,
+        root_folder_path: radarrFolderPath,
+        search_on_add: radarrSearchOnAdd
+      } : {
+        type: 'sonarr',
+        url: sonarrUrl,
+        api_key: sonarrApiKey,
+        quality_profile_id: sonarrProfileId ? parseInt(sonarrProfileId) : null,
+        root_folder_path: sonarrFolderPath,
+        search_on_add: sonarrSearchOnAdd
+      };
+
+      const resp = await fetch('/api/settings/arr', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(payload)
+      });
+      if (resp.ok) {
+        const res = await resp.json();
+        if (isRadarr) {
+          setRadarrConfig(res.config);
+          setRadarrTestResult({ ok: true, msg: 'Radarr configuration saved successfully!' });
+        } else {
+          setSonarrConfig(res.config);
+          setSonarrTestResult({ ok: true, msg: 'Sonarr configuration saved successfully!' });
+        }
+      } else {
+        const err = await resp.json();
+        alert(err.detail || 'Failed to save settings');
+      }
+    } catch (e) {
+      alert(e.message || 'Failed to save settings');
+    } finally {
+      if (isRadarr) setRadarrSaving(false);
+      else setSonarrSaving(false);
+    }
+  };
+
+  const handleDisconnectArr = async (type) => {
+    if (!window.confirm(`Are you sure you want to disconnect ${type === 'radarr' ? 'Radarr' : 'Sonarr'}?`)) return;
+    try {
+      const resp = await fetch('/api/settings/arr/disconnect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ type })
+      });
+      if (resp.ok) {
+        if (type === 'radarr') {
+          setRadarrConfig({ configured: false, url: '', api_key: '', quality_profile_id: null, root_folder_path: '', search_on_add: true });
+          setRadarrUrl('');
+          setRadarrApiKey('');
+          setRadarrProfileId('');
+          setRadarrFolderPath('');
+          setRadarrTestResult(null);
+          setRadarrProfiles([]);
+          setRadarrFolders([]);
+        } else {
+          setSonarrConfig({ configured: false, url: '', api_key: '', quality_profile_id: null, root_folder_path: '', search_on_add: true });
+          setSonarrUrl('');
+          setSonarrApiKey('');
+          setSonarrProfileId('');
+          setSonarrFolderPath('');
+          setSonarrTestResult(null);
+          setSonarrProfiles([]);
+          setSonarrFolders([]);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   // Poll Trakt Device Token when deviceAuth is active
   useEffect(() => {
@@ -751,6 +969,344 @@ export default function Settings() {
             )}
           </div>
         )}
+      </div>
+
+      {/* Media Automation (*Arr) Section */}
+      <div style={{ marginTop: '4rem', marginBottom: '2rem' }}>
+        <h2 className="page-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Download color="var(--primary)" /> Media Automation (Radarr & Sonarr)
+        </h2>
+        <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+          Connect Radarr and Sonarr to automatically add missing movies and TV series directly from your playlists.
+        </p>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.5rem', marginBottom: '3rem' }}>
+        
+        {/* Radarr Card */}
+        <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '8px',
+                background: 'rgba(234, 179, 8, 0.15)',
+                border: '1px solid rgba(234, 179, 8, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#facc15'
+              }}>
+                <Film size={22} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 600 }}>Radarr</h3>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Movies Manager</span>
+              </div>
+            </div>
+
+            {radarrConfig.configured ? (
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                fontSize: '0.75rem',
+                padding: '3px 8px',
+                borderRadius: '4px',
+                background: 'rgba(16, 185, 129, 0.15)',
+                color: 'var(--success)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                fontWeight: 600
+              }}>
+                <CheckCircle2 size={13} /> Connected
+              </span>
+            ) : (
+              <span style={{
+                fontSize: '0.75rem',
+                padding: '3px 8px',
+                borderRadius: '4px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                color: 'var(--text-muted)',
+                border: '1px solid rgba(255, 255, 255, 0.1)'
+              }}>
+                Not Configured
+              </span>
+            )}
+          </div>
+
+          <form onSubmit={e => { e.preventDefault(); handleSaveArr('radarr'); }} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1 }}>
+            <div className="input-group" style={{ margin: 0 }}>
+              <label style={{ fontSize: '0.85rem' }}>Radarr URL</label>
+              <input
+                type="url"
+                placeholder="http://192.168.1.100:7878"
+                value={radarrUrl}
+                onChange={e => setRadarrUrl(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="input-group" style={{ margin: 0 }}>
+              <label style={{ fontSize: '0.85rem' }}>API Key</label>
+              <input
+                type="password"
+                placeholder="Radarr API Key"
+                value={radarrApiKey}
+                onChange={e => setRadarrApiKey(e.target.value)}
+                required
+              />
+            </div>
+
+            {radarrTestResult && (
+              <div style={{
+                padding: '0.75rem 1rem',
+                borderRadius: '6px',
+                fontSize: '0.85rem',
+                background: radarrTestResult.ok ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                color: radarrTestResult.ok ? 'var(--success)' : 'var(--danger)',
+                border: radarrTestResult.ok ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(239, 68, 68, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}>
+                {radarrTestResult.ok ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                <span>{radarrTestResult.msg}</span>
+              </div>
+            )}
+
+            {radarrFolders.length > 0 && (
+              <div className="input-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '0.85rem' }}>Root Folder</label>
+                <select value={radarrFolderPath} onChange={e => setRadarrFolderPath(e.target.value)}>
+                  {radarrFolders.map(rf => (
+                    <option key={rf.path} value={rf.path}>
+                      {rf.path}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {radarrProfiles.length > 0 && (
+              <div className="input-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '0.85rem' }}>Quality Profile</label>
+                <select value={radarrProfileId} onChange={e => setRadarrProfileId(e.target.value)}>
+                  {radarrProfiles.map(qp => (
+                    <option key={qp.id} value={qp.id}>
+                      {qp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+              <input
+                type="checkbox"
+                id="radarrSearch"
+                checked={radarrSearchOnAdd}
+                onChange={e => setRadarrSearchOnAdd(e.target.checked)}
+                style={{ width: 'auto', margin: 0 }}
+              />
+              <label htmlFor="radarrSearch" style={{ fontSize: '0.85rem', margin: 0, cursor: 'pointer', fontWeight: 'normal' }}>
+                Start search for movie upon adding
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: 'auto', paddingTop: '1rem' }}>
+              {radarrConfig.configured && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.3)', marginRight: 'auto' }}
+                  onClick={() => handleDisconnectArr('radarr')}
+                  title="Disconnect Radarr"
+                >
+                  <Unlink size={15} /> Disconnect
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={radarrTesting}
+                onClick={() => handleTestArr('radarr')}
+              >
+                {radarrTesting ? <RefreshCw size={15} className="animate-spin" /> : 'Test & Load'}
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={radarrSaving}
+              >
+                {radarrSaving ? 'Saving...' : 'Save Radarr'}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Sonarr Card */}
+        <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '8px',
+                background: 'rgba(59, 130, 246, 0.15)',
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#60a5fa'
+              }}>
+                <Tv size={22} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 600 }}>Sonarr</h3>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>TV Series Manager</span>
+              </div>
+            </div>
+
+            {sonarrConfig.configured ? (
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                fontSize: '0.75rem',
+                padding: '3px 8px',
+                borderRadius: '4px',
+                background: 'rgba(16, 185, 129, 0.15)',
+                color: 'var(--success)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                fontWeight: 600
+              }}>
+                <CheckCircle2 size={13} /> Connected
+              </span>
+            ) : (
+              <span style={{
+                fontSize: '0.75rem',
+                padding: '3px 8px',
+                borderRadius: '4px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                color: 'var(--text-muted)',
+                border: '1px solid rgba(255, 255, 255, 0.1)'
+              }}>
+                Not Configured
+              </span>
+            )}
+          </div>
+
+          <form onSubmit={e => { e.preventDefault(); handleSaveArr('sonarr'); }} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1 }}>
+            <div className="input-group" style={{ margin: 0 }}>
+              <label style={{ fontSize: '0.85rem' }}>Sonarr URL</label>
+              <input
+                type="url"
+                placeholder="http://192.168.1.100:8989"
+                value={sonarrUrl}
+                onChange={e => setSonarrUrl(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="input-group" style={{ margin: 0 }}>
+              <label style={{ fontSize: '0.85rem' }}>API Key</label>
+              <input
+                type="password"
+                placeholder="Sonarr API Key"
+                value={sonarrApiKey}
+                onChange={e => setSonarrApiKey(e.target.value)}
+                required
+              />
+            </div>
+
+            {sonarrTestResult && (
+              <div style={{
+                padding: '0.75rem 1rem',
+                borderRadius: '6px',
+                fontSize: '0.85rem',
+                background: sonarrTestResult.ok ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                color: sonarrTestResult.ok ? 'var(--success)' : 'var(--danger)',
+                border: sonarrTestResult.ok ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(239, 68, 68, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}>
+                {sonarrTestResult.ok ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                <span>{sonarrTestResult.msg}</span>
+              </div>
+            )}
+
+            {sonarrFolders.length > 0 && (
+              <div className="input-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '0.85rem' }}>Root Folder</label>
+                <select value={sonarrFolderPath} onChange={e => setSonarrFolderPath(e.target.value)}>
+                  {sonarrFolders.map(rf => (
+                    <option key={rf.path} value={rf.path}>
+                      {rf.path}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {sonarrProfiles.length > 0 && (
+              <div className="input-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '0.85rem' }}>Quality Profile</label>
+                <select value={sonarrProfileId} onChange={e => setSonarrProfileId(e.target.value)}>
+                  {sonarrProfiles.map(qp => (
+                    <option key={qp.id} value={qp.id}>
+                      {qp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+              <input
+                type="checkbox"
+                id="sonarrSearch"
+                checked={sonarrSearchOnAdd}
+                onChange={e => setSonarrSearchOnAdd(e.target.checked)}
+                style={{ width: 'auto', margin: 0 }}
+              />
+              <label htmlFor="sonarrSearch" style={{ fontSize: '0.85rem', margin: 0, cursor: 'pointer', fontWeight: 'normal' }}>
+                Start search for missing episodes upon adding
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: 'auto', paddingTop: '1rem' }}>
+              {sonarrConfig.configured && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.3)', marginRight: 'auto' }}
+                  onClick={() => handleDisconnectArr('sonarr')}
+                  title="Disconnect Sonarr"
+                >
+                  <Unlink size={15} /> Disconnect
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={sonarrTesting}
+                onClick={() => handleTestArr('sonarr')}
+              >
+                {sonarrTesting ? <RefreshCw size={15} className="animate-spin" /> : 'Test & Load'}
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={sonarrSaving}
+              >
+                {sonarrSaving ? 'Saving...' : 'Save Sonarr'}
+              </button>
+            </div>
+          </form>
+        </div>
+
       </div>
 
       {/* Sync Settings Section */}

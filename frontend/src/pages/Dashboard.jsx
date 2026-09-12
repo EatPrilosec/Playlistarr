@@ -47,12 +47,20 @@ export default function Dashboard() {
   const [copiedMissing, setCopiedMissing] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
 
+  // Arr automation state
+  const [arrConfig, setArrConfig] = useState(null);
+  const [addingToArr, setAddingToArr] = useState(false);
+  const [arrActionResult, setArrActionResult] = useState(null);
+  const [itemArrStatus, setItemArrStatus] = useState({});
+
   const handleOpenItems = async (playlist, forceRefresh = false) => {
     setInspectingPlaylist(playlist);
     setLoadingItems(true);
     setItemsFilter('all');
     setServerFilter('all');
     setItemsSearchQuery('');
+    setArrActionResult(null);
+    fetchArrConfig();
     try {
       const url = forceRefresh 
         ? `/api/playlists/${playlist.id}/items?refresh=true` 
@@ -185,9 +193,106 @@ export default function Dashboard() {
     }
   };
 
+  const fetchArrConfig = async () => {
+    try {
+      const resp = await fetch('/api/settings/arr', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setArrConfig(data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleAddMissingToArr = async () => {
+    if (!inspectingPlaylist) return;
+    setAddingToArr(true);
+    setArrActionResult(null);
+    try {
+      const resp = await fetch(`/api/playlists/${inspectingPlaylist.id}/add-to-arr`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({})
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setArrActionResult(data);
+        if (data.results) {
+          setItemArrStatus(prev => {
+            const next = { ...prev };
+            data.results.forEach(res => {
+              const match = itemsData?.items?.find(it => (it.show_title || it.title) === res.title || it.title === res.title);
+              if (match) {
+                next[match.order] = {
+                  loading: false,
+                  success: res.status === 'added' || res.status === 'already_exists',
+                  message: res.status === 'added' ? 'Added ✓' : res.status === 'already_exists' ? 'In Library' : 'Failed'
+                };
+              }
+            });
+            return next;
+          });
+        }
+      } else {
+        const err = await resp.json();
+        alert(err.detail || 'Failed to add missing items to Radarr/Sonarr');
+      }
+    } catch (e) {
+      alert(e.message || 'Error communicating with server');
+    } finally {
+      setAddingToArr(false);
+    }
+  };
+
+  const handleAddSingleItemToArr = async (item, target) => {
+    setItemArrStatus(prev => ({
+      ...prev,
+      [item.order]: { loading: true, message: 'Adding...' }
+    }));
+    try {
+      const resp = await fetch('/api/playlists/add-item-to-arr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ item, target })
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        const isSuccess = data.status === 'added' || data.status === 'already_exists';
+        setItemArrStatus(prev => ({
+          ...prev,
+          [item.order]: {
+            loading: false,
+            success: isSuccess,
+            message: data.status === 'added' ? 'Added ✓' : data.status === 'already_exists' ? 'In Library' : 'Not Found'
+          }
+        }));
+      } else {
+        setItemArrStatus(prev => ({
+          ...prev,
+          [item.order]: { loading: false, success: false, message: 'Failed' }
+        }));
+      }
+    } catch (e) {
+      setItemArrStatus(prev => ({
+        ...prev,
+        [item.order]: { loading: false, success: false, message: 'Error' }
+      }));
+    }
+  };
+
   useEffect(() => {
     fetchPlaylists();
     fetchUsers();
+    fetchArrConfig();
   }, []);
 
   const handleFileUpload = async (file, type) => {
@@ -997,6 +1102,35 @@ export default function Dashboard() {
                     {copiedMissing ? 'Copied Missing Items!' : 'Copy Missing'}
                   </button>
                 )}
+
+                {(arrConfig?.radarr?.configured || arrConfig?.sonarr?.configured) && itemsData?.total_unmatched > 0 && (
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleAddMissingToArr}
+                    disabled={addingToArr}
+                    style={{
+                      padding: '0.4rem 0.85rem',
+                      fontSize: '0.8rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+                      border: 'none',
+                      boxShadow: '0 2px 8px rgba(99, 102, 241, 0.4)'
+                    }}
+                    title="Send all missing movies to Radarr and missing series to Sonarr"
+                  >
+                    {addingToArr ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" /> Adding...
+                      </>
+                    ) : (
+                      <>
+                        <Download size={14} /> Add Missing to *Arr
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1041,6 +1175,37 @@ export default function Dashboard() {
                 </button>
               )}
             </div>
+
+            {/* Arr Action Result Banner */}
+            {arrActionResult && (
+              <div style={{
+                margin: '0.75rem 1.5rem 0',
+                padding: '0.75rem 1rem',
+                borderRadius: '8px',
+                background: 'rgba(99, 102, 241, 0.15)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                color: '#fff',
+                fontSize: '0.85rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <CheckCircle2 size={16} color="var(--success)" />
+                  <span>
+                    *Arr Action Completed: <strong>{arrActionResult.added}</strong> added, <strong>{arrActionResult.already_exists}</strong> already in library
+                    {arrActionResult.failed > 0 && `, ${arrActionResult.failed} failed/not found`}
+                    {arrActionResult.skipped > 0 && `, ${arrActionResult.skipped} skipped`}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setArrActionResult(null)}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
 
             {/* Scrollable Items List */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.5rem' }}>
@@ -1200,8 +1365,56 @@ export default function Dashboard() {
                           </div>
                         </div>
 
-                        {/* Per-server badges */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-end' }}>
+                        {/* Per-server badges & Quick Arr Actions */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', alignItems: 'flex-end' }}>
+                          <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+                            {!isMatched && (item.media_type === 'episode' || item.show_title || item.tvdb_id) && arrConfig?.sonarr?.configured && (
+                              <button
+                                onClick={() => handleAddSingleItemToArr(item, 'sonarr')}
+                                disabled={itemArrStatus[item.order]?.loading}
+                                style={{
+                                  background: itemArrStatus[item.order]?.success ? 'rgba(34, 197, 94, 0.2)' : 'rgba(59, 130, 246, 0.15)',
+                                  color: itemArrStatus[item.order]?.success ? '#4ade80' : '#60a5fa',
+                                  border: '1px solid rgba(59, 130, 246, 0.3)',
+                                  borderRadius: '4px',
+                                  padding: '2px 8px',
+                                  fontSize: '0.72rem',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}
+                                title="Add TV series to Sonarr"
+                              >
+                                {itemArrStatus[item.order]?.loading ? <Loader2 size={11} className="animate-spin" /> : itemArrStatus[item.order]?.success ? <Check size={11} /> : <Plus size={11} />}
+                                {itemArrStatus[item.order]?.message || '+ Sonarr'}
+                              </button>
+                            )}
+
+                            {!isMatched && !(item.media_type === 'episode' || item.show_title || item.tvdb_id) && arrConfig?.radarr?.configured && (
+                              <button
+                                onClick={() => handleAddSingleItemToArr(item, 'radarr')}
+                                disabled={itemArrStatus[item.order]?.loading}
+                                style={{
+                                  background: itemArrStatus[item.order]?.success ? 'rgba(34, 197, 94, 0.2)' : 'rgba(234, 179, 8, 0.15)',
+                                  color: itemArrStatus[item.order]?.success ? '#4ade80' : '#facc15',
+                                  border: '1px solid rgba(234, 179, 8, 0.3)',
+                                  borderRadius: '4px',
+                                  padding: '2px 8px',
+                                  fontSize: '0.72rem',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}
+                                title="Add movie to Radarr"
+                              >
+                                {itemArrStatus[item.order]?.loading ? <Loader2 size={11} className="animate-spin" /> : itemArrStatus[item.order]?.success ? <Check size={11} /> : <Plus size={11} />}
+                                {itemArrStatus[item.order]?.message || '+ Radarr'}
+                              </button>
+                            )}
+                          </div>
+
                           {item.servers && Object.entries(item.servers).map(([sName, sData]) => (
                             <span
                               key={sName}

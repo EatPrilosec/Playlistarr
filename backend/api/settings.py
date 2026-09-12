@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from typing import Optional, List, Dict, Any
 import os
 import httpx
 import datetime
 from ..database import get_db
 from ..models import Server, User, AppSetting
+from ..services.arr_client import RadarrClient, SonarrClient, get_arr_config
 from .auth import get_current_user
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -357,4 +359,124 @@ async def disconnect_simkl(db: Session = Depends(get_db), current_user: User = D
             db.delete(s)
     db.commit()
     return {"status": "ok", "connected": False}
+
+
+# --- Sonarr & Radarr (*Arr) Endpoints ---
+
+class ArrTestRequest(BaseModel):
+    type: str  # "radarr" | "sonarr"
+    url: str
+    api_key: str
+
+class ArrSaveRequest(BaseModel):
+    type: str  # "radarr" | "sonarr"
+    url: str
+    api_key: str
+    quality_profile_id: Optional[int] = None
+    root_folder_path: Optional[str] = None
+    search_on_add: Optional[bool] = True
+
+class ArrDisconnectRequest(BaseModel):
+    type: str  # "radarr" | "sonarr"
+
+@router.get("/arr")
+async def get_arr_settings(db: Session = Depends(get_db)):
+    """Returns current connection status and saved settings for Radarr and Sonarr."""
+    return get_arr_config(db)
+
+@router.post("/arr/test")
+async def test_arr_connection(req: ArrTestRequest, current_user: User = Depends(get_current_user)):
+    """Tests connection to Radarr or Sonarr and returns discovered profiles and root folders."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    url = (req.url or "").rstrip("/")
+    api_key = req.api_key or ""
+    if not url or not api_key:
+        raise HTTPException(status_code=400, detail="URL and API Key are required")
+
+    try:
+        if req.type.lower() == "radarr":
+            client = RadarrClient(url, api_key)
+            status = await client.test_connection()
+            root_folders = await client.get_root_folders()
+            quality_profiles = await client.get_quality_profiles()
+            return {
+                "status": "ok",
+                "app_name": status.get("appName", "Radarr"),
+                "version": status.get("version", ""),
+                "root_folders": root_folders,
+                "quality_profiles": quality_profiles
+            }
+        elif req.type.lower() == "sonarr":
+            client = SonarrClient(url, api_key)
+            status = await client.test_connection()
+            root_folders = await client.get_root_folders()
+            quality_profiles = await client.get_quality_profiles()
+            return {
+                "status": "ok",
+                "app_name": status.get("appName", "Sonarr"),
+                "version": status.get("version", ""),
+                "root_folders": root_folders,
+                "quality_profiles": quality_profiles
+            }
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported service type: {req.type}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Connection test failed: {str(e)}")
+
+@router.put("/arr")
+async def save_arr_settings(req: ArrSaveRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Saves configuration for Radarr or Sonarr."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    prefix = req.type.lower()
+    if prefix not in ("radarr", "sonarr"):
+        raise HTTPException(status_code=400, detail=f"Unsupported service type: {req.type}")
+
+    settings_to_update = {
+        f"{prefix}_url": req.url.rstrip("/"),
+        f"{prefix}_api_key": req.api_key,
+        f"{prefix}_quality_profile_id": str(req.quality_profile_id) if req.quality_profile_id is not None else "",
+        f"{prefix}_root_folder_path": req.root_folder_path or "",
+        f"{prefix}_search_on_add": "true" if req.search_on_add else "false"
+    }
+
+    for k, v in settings_to_update.items():
+        s = db.query(AppSetting).filter(AppSetting.key == k).first()
+        if not s:
+            s = AppSetting(key=k, value=str(v))
+            db.add(s)
+        else:
+            s.value = str(v)
+
+    db.commit()
+    return {"status": "ok", "config": get_arr_config(db)[prefix]}
+
+@router.post("/arr/disconnect")
+async def disconnect_arr(req: ArrDisconnectRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Removes saved configuration for Radarr or Sonarr."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    prefix = req.type.lower()
+    if prefix not in ("radarr", "sonarr"):
+        raise HTTPException(status_code=400, detail=f"Unsupported service type: {req.type}")
+
+    keys = [
+        f"{prefix}_url",
+        f"{prefix}_api_key",
+        f"{prefix}_quality_profile_id",
+        f"{prefix}_root_folder_path",
+        f"{prefix}_search_on_add"
+    ]
+    for k in keys:
+        s = db.query(AppSetting).filter(AppSetting.key == k).first()
+        if s:
+            db.delete(s)
+
+    db.commit()
+    return {"status": "ok", "disconnected": prefix}
+
 
