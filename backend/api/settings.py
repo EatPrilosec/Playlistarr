@@ -33,7 +33,7 @@ async def get_server_users(db: Session = Depends(get_db), current_user: User = D
     
     for server in servers:
         if server.api_key:
-            client = MediaServerClient(server.url, server.api_key)
+            client = MediaServerClient(server.url, server.api_key, server.server_type)
             try:
                 users = await client.get_users()
                 for u in users:
@@ -79,7 +79,7 @@ async def test_server(req: ServerRequest, current_user: User = Depends(get_curre
         raise HTTPException(status_code=403)
         
     from ..services.media_server import MediaServerClient
-    client = MediaServerClient(req.url.rstrip("/"), req.api_key)
+    client = MediaServerClient(req.url.rstrip("/"), req.api_key, req.server_type)
     try:
         await client.get_users()
         return {"status": "ok", "message": "Connection successful"}

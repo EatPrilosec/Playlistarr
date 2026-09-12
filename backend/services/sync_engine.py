@@ -28,7 +28,7 @@ async def sync_list_config(db: Session, list_config: ListConfig):
             if not server.api_key:
                 continue
 
-            ms_client = MediaServerClient(server.url, server.api_key)
+            ms_client = MediaServerClient(server.url, server.api_key, server.server_type)
             
             try:
                 # Concurrent matching with Semaphore and shared httpx.AsyncClient
