@@ -31,6 +31,9 @@ class ListConfig(Base):
     is_global = Column(Boolean, default=False)
     target_username = Column(String, nullable=True) # Target Emby/JF user
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True) # Null if global
+    image_url = Column(String, nullable=True) # Poster / Thumbnail
+    backdrop_url = Column(String, nullable=True) # Fanart / Backdrop
+    banner_url = Column(String, nullable=True) # Banner
     
     user = relationship("User")
 

@@ -1,5 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse, Response
+import os
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi.responses import JSONResponse, Response, FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import datetime
@@ -10,6 +12,9 @@ from ..services.sync_engine import run_sync_background
 
 router = APIRouter(prefix="/api/playlists", tags=["playlists"])
 
+CUSTOM_IMAGES_DIR = "/config/custom_images" if os.path.exists("/config") else os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "custom_images")
+os.makedirs(CUSTOM_IMAGES_DIR, exist_ok=True)
+
 class ListConfigRequest(BaseModel):
     name: str
     provider: str
@@ -17,6 +22,37 @@ class ListConfigRequest(BaseModel):
     sort_order: str = "custom"
     is_global: bool = False
     target_username: str | None = None
+    image_url: str | None = None
+    backdrop_url: str | None = None
+    banner_url: str | None = None
+
+@router.post("/upload-image")
+async def upload_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """Upload custom image file (poster, backdrop, or banner)"""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in [".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"]:
+        raise HTTPException(status_code=400, detail="Unsupported image format. Please upload JPG, PNG, WEBP, or SVG.")
+        
+    filename = f"{uuid.uuid4().hex[:12]}{ext}"
+    dest_path = os.path.join(CUSTOM_IMAGES_DIR, filename)
+    
+    contents = await file.read()
+    with open(dest_path, "wb") as f:
+        f.write(contents)
+        
+    return {"url": f"/api/playlists/images/{filename}"}
+
+@router.get("/images/{filename}")
+async def get_image(filename: str):
+    """Serve uploaded custom playlist images"""
+    clean_name = os.path.basename(filename)
+    path = os.path.join(CUSTOM_IMAGES_DIR, clean_name)
+    if not os.path.exists(path) or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(path)
 
 @router.post("")
 async def create_playlist(
@@ -35,7 +71,10 @@ async def create_playlist(
         sort_order=req.sort_order,
         is_global=req.is_global,
         target_username=req.target_username,
-        user_id=None if req.is_global else current_user.id
+        user_id=None if req.is_global else current_user.id,
+        image_url=req.image_url,
+        backdrop_url=req.backdrop_url,
+        banner_url=req.banner_url
     )
     db.add(config)
     db.commit()
@@ -81,6 +120,9 @@ async def update_playlist(
     config.source_url = req.source_url
     config.sort_order = req.sort_order
     config.is_global = req.is_global
+    config.image_url = req.image_url
+    config.backdrop_url = req.backdrop_url
+    config.banner_url = req.banner_url
     
     if req.is_global:
         config.target_username = None

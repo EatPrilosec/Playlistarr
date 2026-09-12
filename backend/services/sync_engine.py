@@ -53,11 +53,16 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                     matched_ids = [mid for mid in search_results if mid]
 
                 if matched_ids:
+                    images = {
+                        "Primary": list_config.image_url,
+                        "Backdrop": list_config.backdrop_url,
+                        "Banner": list_config.banner_url
+                    }
                     if list_config.is_global:
                         # Push to all users on this server
                         users = await ms_client.get_users()
                         for u in users:
-                            await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=u.get("Id"))
+                            await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=u.get("Id"), images=images)
                     else:
                         if list_config.target_username:
                             users = await ms_client.get_users()
@@ -67,11 +72,11 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                                     target_id = u.get("Id")
                                     break
                             if target_id:
-                                await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=target_id)
+                                await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=target_id, images=images)
                             else:
                                 raise Exception(f"User {list_config.target_username} not found on {server.name}")
                         else:
-                            await ms_client.create_or_update_playlist(list_config.name, matched_ids)
+                            await ms_client.create_or_update_playlist(list_config.name, matched_ids, images=images)
                             
                 results.append(f"{server.name}: {len(matched_ids)}/{len(items)} matched")
             except Exception as se:

@@ -131,8 +131,8 @@ class MediaServerClient:
                 return resp.json()
             raise Exception(f"Failed to get users (HTTP {resp.status_code}): {resp.text}")
 
-    async def create_or_update_playlist(self, name: str, item_ids: list[str], user_id: str = None):
-        """Creates a playlist or updates an existing one"""
+    async def create_or_update_playlist(self, name: str, item_ids: list[str], user_id: str = None, images: dict = None):
+        """Creates a playlist or updates an existing one, and sets custom artwork if provided"""
         if not user_id:
             users = await self.get_users()
             if users:
@@ -191,3 +191,17 @@ class MediaServerClient:
                     add_resp = await client.post(add_url, params=add_params)
                     if add_resp.status_code not in [200, 204]:
                         raise Exception(f"Failed to add items batch to playlist: {add_resp.status_code} {add_resp.text}")
+
+            # If images provided, set them on the playlist
+            if images and new_playlist_id:
+                for img_type, img_url in images.items():
+                    if not img_url:
+                        continue
+                    resolved_url = img_url
+                    if resolved_url.startswith("/"):
+                        resolved_url = f"http://127.0.0.1:8671{resolved_url}"
+                    try:
+                        dl_url = f"{self.server_url}/Items/{new_playlist_id}/RemoteImages/Download"
+                        await client.post(dl_url, params={"Type": img_type, "ImageUrl": resolved_url})
+                    except Exception as ie:
+                        print(f"Failed to set {img_type} image on {name}: {ie}")

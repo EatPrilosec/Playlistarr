@@ -15,7 +15,9 @@ def get_database_url():
             except Exception as e:
                 print(f"Error copying db from /app/data to /config: {e}")
         return "sqlite:////config/playlistarr.db"
-    return "sqlite:////app/data/playlistarr.db"
+    if os.path.exists("/DockerData/playlistarr/config"):
+        return "sqlite:////DockerData/playlistarr/config/playlistarr.db"
+    return "sqlite:///./playlistarr.db"
 
 DATABASE_URL = get_database_url()
 
@@ -41,9 +43,26 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
+def run_migrations():
+    try:
+        with engine.connect() as conn:
+            cursor = conn.connection.cursor()
+            cursor.execute("PRAGMA table_info(list_configs)")
+            cols = [col[1] for col in cursor.fetchall()]
+            if cols:
+                for col in ["image_url", "backdrop_url", "banner_url"]:
+                    if col not in cols:
+                        cursor.execute(f"ALTER TABLE list_configs ADD COLUMN {col} VARCHAR")
+                conn.connection.commit()
+    except Exception as e:
+        print(f"Migration notice: {e}")
+
+run_migrations()
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
