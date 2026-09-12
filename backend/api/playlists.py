@@ -7,8 +7,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import datetime
 from ..database import get_db
-from ..models import ListConfig, User
+from ..models import ListConfig, User, Server, SyncLog
 from .auth import get_current_user
+from ..services.media_server import MediaServerClient
 from ..services.sync_engine import run_sync_background, get_playlist_items_with_matches
 from ..services.arr_client import RadarrClient, SonarrClient, get_arr_config
 
@@ -117,6 +118,30 @@ async def update_playlist(
     if not current_user.is_admin and config.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to edit this playlist")
         
+    old_name = (config.name or "").strip()
+    new_name = (req.name or "").strip()
+    is_renamed = bool(old_name and new_name and old_name.lower() != new_name.lower())
+
+    if is_renamed:
+        servers = db.query(Server).filter(Server.api_key.isnot(None)).all()
+        for server in servers:
+            try:
+                ms_client = MediaServerClient(server.url, server.api_key, server.server_type)
+                if config.is_global or req.is_global:
+                    await ms_client.rename_playlist(old_name, new_name)
+                else:
+                    target_name = req.target_username or config.target_username
+                    target_id = None
+                    if target_name:
+                        users = await ms_client.get_users()
+                        for u in users:
+                            if (u.get("Name") or "").lower() == target_name.lower():
+                                target_id = u.get("Id")
+                                break
+                    await ms_client.rename_playlist(old_name, new_name, user_id=target_id)
+            except Exception as se:
+                print(f"Error renaming playlist '{old_name}' to '{new_name}' on server {server.name}: {se}")
+
     config.name = req.name
     config.provider = req.provider
     config.source_url = req.source_url
@@ -213,7 +238,28 @@ async def delete_playlist(
         
     if not current_user.is_admin and config.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this playlist")
-        
+
+    # Delete matching playlists from all configured media servers
+    servers = db.query(Server).filter(Server.api_key.isnot(None)).all()
+    for server in servers:
+        try:
+            ms_client = MediaServerClient(server.url, server.api_key, server.server_type)
+            if config.is_global:
+                await ms_client.delete_playlist(config.name)
+            else:
+                target_id = None
+                if config.target_username:
+                    users = await ms_client.get_users()
+                    for u in users:
+                        if (u.get("Name") or "").lower() == config.target_username.lower():
+                            target_id = u.get("Id")
+                            break
+                await ms_client.delete_playlist(config.name, user_id=target_id)
+        except Exception as se:
+            print(f"Error deleting playlist '{config.name}' from server {server.name}: {se}")
+
+    # Delete associated sync logs to maintain foreign key integrity
+    db.query(SyncLog).filter(SyncLog.list_config_id == playlist_id).delete()
     db.delete(config)
     db.commit()
     return {"message": "Playlist deleted successfully"}

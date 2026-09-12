@@ -224,20 +224,22 @@ class MediaServerClient:
             "SearchTerm": name
         }
             
-        playlist_id = None
+        existing_ids = []
         async with httpx.AsyncClient(headers=self.headers, timeout=15.0) as client:
             resp = await client.get(url, params=params)
             if resp.status_code == 200:
                 items = resp.json().get("Items", [])
                 for p in items:
-                    if p.get("Name", "") == name:
-                        playlist_id = p.get("Id")
-                        break
+                    if (p.get("Name") or "").strip().lower() == name.strip().lower() and p.get("Id"):
+                        existing_ids.append(p.get("Id"))
         
-            # If playlist exists, remove old one to recreate fresh with matched items
-            if playlist_id:
-                delete_url = f"{self.server_url}/Items/{playlist_id}"
-                await client.delete(delete_url)
+            # If playlist(s) exist, remove them to recreate fresh with matched items
+            for old_id in existing_ids:
+                try:
+                    delete_url = f"{self.server_url}/Items/{old_id}"
+                    await client.delete(delete_url)
+                except Exception as de:
+                    print(f"Error removing existing playlist {old_id}: {de}")
             
             create_url = f"{self.server_url}/Playlists"
             create_params = {
@@ -281,3 +283,149 @@ class MediaServerClient:
                         await client.post(dl_url, params={"Type": img_type, "ImageUrl": resolved_url})
                     except Exception as ie:
                         print(f"Failed to set {img_type} image on {name}: {ie}")
+
+    async def delete_playlist(self, name: str, user_id: str = None) -> list[str]:
+        """Deletes all playlists matching name (case-insensitive) for a specific user or globally across all users."""
+        deleted_ids = []
+        clean_name = (name or "").strip().lower()
+        if not clean_name:
+            return deleted_ids
+
+        async with httpx.AsyncClient(headers=self.headers, timeout=15.0) as client:
+            candidate_items = []
+            # 1. Server-wide playlists query
+            try:
+                resp = await client.get(f"{self.server_url}/Items", params={
+                    "IncludeItemTypes": "Playlist",
+                    "Recursive": "true"
+                })
+                if resp.status_code == 200:
+                    candidate_items.extend(resp.json().get("Items", []))
+            except Exception as e:
+                print(f"Error fetching /Items in delete_playlist: {e}")
+
+            # 2. Check per-user items if specific user_id or all users if user_id is None
+            try:
+                if user_id:
+                    users_to_check = [{"Id": user_id}]
+                else:
+                    users_to_check = await self.get_users()
+            except Exception:
+                users_to_check = []
+
+            for u in users_to_check:
+                uid = u.get("Id")
+                if not uid:
+                    continue
+                try:
+                    u_resp = await client.get(f"{self.server_url}/Users/{uid}/Items", params={
+                        "IncludeItemTypes": "Playlist",
+                        "Recursive": "true"
+                    })
+                    if u_resp.status_code == 200:
+                        candidate_items.extend(u_resp.json().get("Items", []))
+                except Exception:
+                    pass
+
+            # Filter exact name match (case-insensitive) and deduplicate IDs
+            seen_ids = set()
+            for it in candidate_items:
+                it_id = it.get("Id")
+                it_name = (it.get("Name") or "").strip().lower()
+                if it_id and it_id not in seen_ids and it_name == clean_name:
+                    seen_ids.add(it_id)
+                    try:
+                        del_resp = await client.delete(f"{self.server_url}/Items/{it_id}")
+                        if del_resp.status_code in (200, 204):
+                            deleted_ids.append(it_id)
+                    except Exception as de:
+                        print(f"Failed to delete playlist {it_id} ({it.get('Name')}): {de}")
+
+        return deleted_ids
+
+    async def rename_playlist(self, old_name: str, new_name: str, user_id: str = None) -> list[str]:
+        """Renames all playlists matching old_name to new_name, or deletes old_name if new_name already exists."""
+        clean_old = (old_name or "").strip().lower()
+        clean_new = (new_name or "").strip().lower()
+        if not clean_old or not clean_new or clean_old == clean_new:
+            return []
+
+        affected_ids = []
+        async with httpx.AsyncClient(headers=self.headers, timeout=15.0) as client:
+            candidate_items = []
+            try:
+                resp = await client.get(f"{self.server_url}/Items", params={
+                    "IncludeItemTypes": "Playlist",
+                    "Recursive": "true"
+                })
+                if resp.status_code == 200:
+                    candidate_items.extend(resp.json().get("Items", []))
+            except Exception as e:
+                print(f"Error fetching /Items in rename_playlist: {e}")
+
+            try:
+                if user_id:
+                    users_to_check = [{"Id": user_id}]
+                else:
+                    users_to_check = await self.get_users()
+            except Exception:
+                users_to_check = []
+
+            for u in users_to_check:
+                uid = u.get("Id")
+                if not uid:
+                    continue
+                try:
+                    u_resp = await client.get(f"{self.server_url}/Users/{uid}/Items", params={
+                        "IncludeItemTypes": "Playlist",
+                        "Recursive": "true"
+                    })
+                    if u_resp.status_code == 200:
+                        candidate_items.extend(u_resp.json().get("Items", []))
+                except Exception:
+                    pass
+
+            # Check if any playlist with new_name already exists
+            new_name_exists = any(
+                (it.get("Name") or "").strip().lower() == clean_new
+                for it in candidate_items
+            )
+
+            seen_ids = set()
+            for it in candidate_items:
+                it_id = it.get("Id")
+                it_name = (it.get("Name") or "").strip().lower()
+                if it_id and it_id not in seen_ids and it_name == clean_old:
+                    seen_ids.add(it_id)
+                    # If new_name already exists on the server, delete old_name to avoid duplicates
+                    if new_name_exists:
+                        try:
+                            del_resp = await client.delete(f"{self.server_url}/Items/{it_id}")
+                            if del_resp.status_code in (200, 204):
+                                affected_ids.append(it_id)
+                        except Exception as de:
+                            print(f"Failed to delete duplicate old playlist {it_id}: {de}")
+                    else:
+                        # Otherwise, rename in-place via POST /Items/{it_id}
+                        try:
+                            item_data = None
+                            if users_to_check:
+                                uid = users_to_check[0].get("Id")
+                                u_get = await client.get(f"{self.server_url}/Users/{uid}/Items/{it_id}")
+                                if u_get.status_code == 200:
+                                    item_data = u_get.json()
+                            if not item_data:
+                                get_resp = await client.get(f"{self.server_url}/Items", params={"Ids": it_id})
+                                if get_resp.status_code == 200:
+                                    items = get_resp.json().get("Items", [])
+                                    if items:
+                                        item_data = items[0]
+                            if item_data:
+                                item_data["Name"] = new_name.strip()
+                                post_resp = await client.post(f"{self.server_url}/Items/{it_id}", json=item_data)
+                                if post_resp.status_code in (200, 204):
+                                    affected_ids.append(it_id)
+                        except Exception as re:
+                            print(f"Failed to rename playlist {it_id}: {re}")
+
+        return affected_ids
