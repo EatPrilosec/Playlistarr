@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { 
   Server, Plus, Trash2, Edit2, Clock, Tv, ExternalLink, Copy, Check, 
-  RefreshCw, Unlink, Film, Download, CheckCircle2, AlertCircle, Loader2 
+  RefreshCw, Unlink, Film, Download, CheckCircle2, AlertCircle, Loader2, Heart 
 } from 'lucide-react';
 
 export default function Settings() {
@@ -1328,6 +1328,85 @@ export default function Settings() {
             <button type="submit" className="btn btn-primary" disabled={savingInterval}>{savingInterval ? 'Saving...' : 'Save Settings'}</button>
           </div>
         </form>
+      </div>
+
+      {/* Support & Donations Section */}
+      <div style={{ marginTop: '4rem', marginBottom: '2rem' }}>
+        <h2 className="page-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Heart color="#ff4d6d" fill="#ff4d6d" size={24} /> Support & Donations
+        </h2>
+        <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+          Playlistarr is free, open-source software built for the self-hosted media community.
+        </p>
+      </div>
+
+      <div className="glass-panel" style={{
+        padding: '2rem',
+        maxWidth: '650px',
+        background: 'linear-gradient(135deg, rgba(0, 112, 186, 0.08) 0%, rgba(26, 32, 44, 0.6) 100%)',
+        border: '1px solid rgba(0, 150, 255, 0.25)',
+        borderRadius: '16px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1.25rem' }}>
+          <div style={{
+            background: 'rgba(0, 112, 186, 0.2)',
+            border: '1px solid rgba(0, 150, 255, 0.3)',
+            borderRadius: '12px',
+            padding: '1rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            <Heart size={32} color="#ff4d6d" fill="#ff4d6d" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+              Buy the Developer a Coffee
+            </h3>
+            <p style={{ margin: '0.5rem 0 1.25rem 0', fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+              If Playlistarr has made your media library better, consider sending a small tip via PayPal. Every contribution directly supports active development, maintenance, and new features!
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+              <a
+                href="https://paypal.me/DVDIsDead"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.6rem',
+                  padding: '0.65rem 1.4rem',
+                  borderRadius: '10px',
+                  fontWeight: 600,
+                  fontSize: '0.92rem',
+                  textDecoration: 'none',
+                  background: 'linear-gradient(135deg, #0079C1 0%, #00457C 100%)',
+                  color: '#ffffff',
+                  boxShadow: '0 4px 14px rgba(0, 112, 186, 0.35)',
+                  border: 'none',
+                  transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 6px 18px rgba(0, 112, 186, 0.5)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 4px 14px rgba(0, 112, 186, 0.35)';
+                }}
+              >
+                <Heart size={16} fill="#ffffff" color="#ffffff" />
+                <span>Donate with PayPal (DVDIsDead)</span>
+              </a>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                paypal.me/DVDIsDead
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
 
     </div>

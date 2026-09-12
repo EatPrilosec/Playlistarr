@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
-import { Play } from 'lucide-react';
+import { Play, Heart } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Setup from './pages/Setup';
@@ -77,22 +77,47 @@ function App() {
 
   return (
     <Router>
-      <div className="layout">
+      <div className="layout" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
         {isAuthenticated && (
           <header className="header">
             <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
               <Play color="var(--primary)" fill="var(--primary)" />
               <h1>Playlistarr</h1>
             </div>
-            <nav className="nav-links">
+            <nav className="nav-links" style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
               <Link to="/dashboard">Playlists</Link>
-              {isAdmin && <Link to="/settings">Servers</Link>}
+              {isAdmin && <Link to="/settings">Settings</Link>}
+              <a
+                href="https://paypal.me/DVDIsDead"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="donate-pill"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  padding: '0.4rem 0.85rem',
+                  borderRadius: '20px',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  background: 'rgba(0, 112, 186, 0.18)',
+                  border: '1px solid rgba(0, 150, 255, 0.35)',
+                  color: '#60b6ff',
+                  transition: 'all 0.2s ease',
+                  cursor: 'pointer'
+                }}
+                title="Support Playlistarr via PayPal"
+              >
+                <Heart size={13} fill="#ff4d6d" color="#ff4d6d" />
+                <span>Donate</span>
+              </a>
               <button className="btn btn-secondary" onClick={handleLogout} style={{padding: '0.5rem 1rem'}}>Logout</button>
             </nav>
           </header>
         )}
         
-        <main className="main-content">
+        <main className="main-content" style={{ flex: 1 }}>
           <Routes>
             {!setupComplete && (
               <Route path="/setup" element={<Setup onComplete={setSetupComplete} />} />
@@ -117,6 +142,48 @@ function App() {
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </main>
+
+        {isAuthenticated && (
+          <footer style={{
+            marginTop: 'auto',
+            padding: '1.25rem 2rem',
+            textAlign: 'center',
+            fontSize: '0.82rem',
+            color: 'var(--text-muted)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: '1rem',
+            borderTop: '1px solid rgba(255, 255, 255, 0.05)'
+          }}>
+            <span>Playlistarr</span>
+            <span>•</span>
+            <a
+              href="https://github.com/EatPrilosec/Playlistarr"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: 'var(--text-muted)', textDecoration: 'none' }}
+            >
+              GitHub
+            </a>
+            <span>•</span>
+            <a
+              href="https://paypal.me/DVDIsDead"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                color: '#60b6ff',
+                textDecoration: 'none',
+                fontWeight: 500
+              }}
+            >
+              <Heart size={13} fill="#ff4d6d" color="#ff4d6d" /> Donate (PayPal)
+            </a>
+          </footer>
+        )}
       </div>
     </Router>
   );
