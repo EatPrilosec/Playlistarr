@@ -34,6 +34,7 @@ class ListConfig(Base):
     image_url = Column(String, nullable=True) # Poster / Thumbnail
     backdrop_url = Column(String, nullable=True) # Fanart / Backdrop
     banner_url = Column(String, nullable=True) # Banner
+    last_items_json = Column(String, nullable=True) # Cached JSON of items and per-server match status
     
     user = relationship("User")
 

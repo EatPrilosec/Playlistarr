@@ -50,9 +50,9 @@ def run_migrations():
             cursor.execute("PRAGMA table_info(list_configs)")
             cols = [col[1] for col in cursor.fetchall()]
             if cols:
-                for col in ["image_url", "backdrop_url", "banner_url"]:
+                for col, col_type in [("image_url", "VARCHAR"), ("backdrop_url", "VARCHAR"), ("banner_url", "VARCHAR"), ("last_items_json", "TEXT")]:
                     if col not in cols:
-                        cursor.execute(f"ALTER TABLE list_configs ADD COLUMN {col} VARCHAR")
+                        cursor.execute(f"ALTER TABLE list_configs ADD COLUMN {col} {col_type}")
                 conn.connection.commit()
     except Exception as e:
         print(f"Migration notice: {e}")

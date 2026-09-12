@@ -1,5 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
-import { Plus, Settings, RefreshCw, Trash2, ListVideo, Edit2, Download, Image as ImageIcon, Upload, X, Loader2 } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { 
+  Plus, Settings, RefreshCw, Trash2, ListVideo, Edit2, Download, 
+  Image as ImageIcon, Upload, X, Loader2, ListFilter, CheckCircle2, 
+  XCircle, Search, Copy, Check, Film, Tv, ExternalLink 
+} from 'lucide-react';
 
 export default function Dashboard() {
   const [playlists, setPlaylists] = useState([]);
@@ -32,6 +36,109 @@ export default function Dashboard() {
   
   // Status state
   const [playlistStatuses, setPlaylistStatuses] = useState({});
+
+  // Items Inspection Modal State
+  const [inspectingPlaylist, setInspectingPlaylist] = useState(null);
+  const [itemsData, setItemsData] = useState(null);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [itemsFilter, setItemsFilter] = useState('all'); // 'all' | 'matched' | 'unmatched'
+  const [serverFilter, setServerFilter] = useState('all');
+  const [itemsSearchQuery, setItemsSearchQuery] = useState('');
+  const [copiedMissing, setCopiedMissing] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+
+  const handleOpenItems = async (playlist, forceRefresh = false) => {
+    setInspectingPlaylist(playlist);
+    setLoadingItems(true);
+    setItemsFilter('all');
+    setServerFilter('all');
+    setItemsSearchQuery('');
+    try {
+      const url = forceRefresh 
+        ? `/api/playlists/${playlist.id}/items?refresh=true` 
+        : `/api/playlists/${playlist.id}/items`;
+      const resp = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setItemsData(data);
+      } else {
+        const err = await resp.json();
+        alert(err.detail || 'Failed to load playlist items');
+      }
+    } catch (e) {
+      alert('Error fetching playlist items: ' + e.message);
+    } finally {
+      setLoadingItems(false);
+    }
+  };
+
+  const handleCopyMissing = () => {
+    if (!itemsData || !itemsData.items) return;
+    const missing = itemsData.items.filter(it => {
+      if (serverFilter === 'all') return !it.matched;
+      return !it.servers?.[serverFilter]?.matched;
+    });
+    if (missing.length === 0) return;
+
+    const lines = [
+      `Missing items for "${inspectingPlaylist?.name}" (${missing.length} items):`,
+      ...missing.map(it => {
+        const ids = [];
+        if (it.imdb_id) ids.push(`IMDb: ${it.imdb_id}`);
+        if (it.tmdb_id) ids.push(`TMDb: ${it.tmdb_id}`);
+        if (it.tvdb_id) ids.push(`TVDb: ${it.tvdb_id}`);
+        const idStr = ids.length ? ` [${ids.join(', ')}]` : '';
+        const ep = it.show_title ? ` (${it.show_title})` : '';
+        return `• #${it.order} ${it.title}${ep} (${it.year || 'N/A'})${idStr}`;
+      })
+    ];
+    navigator.clipboard.writeText(lines.join('\n'));
+    setCopiedMissing(true);
+    setTimeout(() => setCopiedMissing(false), 2500);
+  };
+
+  const handleCopyId = (idText) => {
+    navigator.clipboard.writeText(idText);
+    setCopiedId(idText);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const filteredItems = useMemo(() => {
+    if (!itemsData || !itemsData.items) return [];
+    return itemsData.items.filter(it => {
+      // 1. Status Filter
+      if (itemsFilter === 'matched') {
+        if (serverFilter === 'all') {
+          if (!it.matched) return false;
+        } else {
+          if (!it.servers?.[serverFilter]?.matched) return false;
+        }
+      } else if (itemsFilter === 'unmatched') {
+        if (serverFilter === 'all') {
+          if (it.matched) return false;
+        } else {
+          if (it.servers?.[serverFilter]?.matched) return false;
+        }
+      }
+
+      // 2. Text Search
+      if (itemsSearchQuery.trim()) {
+        const q = itemsSearchQuery.toLowerCase();
+        const t = (it.title || '').toLowerCase();
+        const st = (it.show_title || '').toLowerCase();
+        const y = String(it.year || '');
+        const imdb = (it.imdb_id || '').toLowerCase();
+        const tmdb = String(it.tmdb_id || '');
+        const tvdb = String(it.tvdb_id || '');
+        if (!t.includes(q) && !st.includes(q) && !y.includes(q) && !imdb.includes(q) && !tmdb.includes(q) && !tvdb.includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [itemsData, itemsFilter, serverFilter, itemsSearchQuery]);
 
   const fetchPlaylists = async () => {
     try {
@@ -623,27 +730,54 @@ export default function Dashboard() {
               
               <div className="card-footer" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '1rem', marginTop: 'auto', paddingTop: '1rem' }}>
                 
-                <div style={{ padding: '0.75rem', borderRadius: '6px', background: 'rgba(0,0,0,0.25)', fontSize: '0.85rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                    <span style={{ 
-                      width: '8px', height: '8px', borderRadius: '50%', 
-                      background: playlistStatuses[p.id]?.status === 'success' ? 'var(--success)' : 
-                                  playlistStatuses[p.id]?.status === 'error' ? 'var(--danger)' : 
-                                  playlistStatuses[p.id]?.status === 'syncing' ? 'var(--primary)' : 'var(--text-muted)' 
-                    }}></span>
-                    <strong style={{ textTransform: 'capitalize' }}>{playlistStatuses[p.id]?.status || 'Loading...'}</strong>
-                    {playlistStatuses[p.id]?.last_sync && (
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                        ({new Date(playlistStatuses[p.id].last_sync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
-                      </span>
-                    )}
+                <div 
+                  onClick={() => handleOpenItems(p)}
+                  style={{ 
+                    padding: '0.75rem', 
+                    borderRadius: '6px', 
+                    background: 'rgba(0,0,0,0.25)', 
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    border: '1px solid transparent'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)'}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}
+                  title="Click to inspect matched and missing items"
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ 
+                        width: '8px', height: '8px', borderRadius: '50%', 
+                        background: playlistStatuses[p.id]?.status === 'success' ? 'var(--success)' : 
+                                    playlistStatuses[p.id]?.status === 'error' ? 'var(--danger)' : 
+                                    playlistStatuses[p.id]?.status === 'syncing' ? 'var(--primary)' : 'var(--text-muted)' 
+                      }}></span>
+                      <strong style={{ textTransform: 'capitalize' }}>{playlistStatuses[p.id]?.status || 'Loading...'}</strong>
+                      {playlistStatuses[p.id]?.last_sync && (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                          ({new Date(playlistStatuses[p.id].last_sync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '3px', fontWeight: 500 }}>
+                      <ListFilter size={12} /> View Items
+                    </span>
                   </div>
                   <div style={{ color: 'var(--text-muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                     {playlistStatuses[p.id]?.details || ''}
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ padding: '0.4rem 0.65rem', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 500 }} 
+                    title="Inspect Matched and Missing Items" 
+                    onClick={() => handleOpenItems(p)}
+                  >
+                    <ListFilter size={15} /> Matches
+                  </button>
                   <button className="btn btn-secondary" style={{ padding: '0.4rem', borderRadius: '6px' }} title="Sync Now" onClick={() => handleSync(p.id)}>
                     <RefreshCw size={16} className={playlistStatuses[p.id]?.status === 'syncing' ? 'animate-spin' : ''} />
                   </button>
@@ -663,6 +797,465 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      {/* Playlist Items Inspection Modal */}
+      {inspectingPlaylist && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1.5rem'
+        }}>
+          <div className="glass-panel" style={{
+            width: '100%',
+            maxWidth: '960px',
+            height: '88vh',
+            display: 'flex',
+            flexDirection: 'column',
+            borderRadius: '16px',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.8)',
+            overflow: 'hidden',
+            background: 'var(--bg-card, #111827)'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'rgba(0, 0, 0, 0.2)'
+            }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>{inspectingPlaylist.name}</h3>
+                  <span style={{
+                    fontSize: '0.7rem',
+                    textTransform: 'uppercase',
+                    background: 'rgba(99, 102, 241, 0.15)',
+                    color: 'var(--primary)',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontWeight: 600,
+                    border: '1px solid rgba(99, 102, 241, 0.3)'
+                  }}>
+                    {inspectingPlaylist.provider}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <span>Target: {inspectingPlaylist.is_global ? 'Global (All Users)' : inspectingPlaylist.target_username}</span>
+                  {itemsData?.last_evaluated && (
+                    <span>Last analyzed: {new Date(itemsData.last_evaluated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <button
+                  className="btn btn-secondary"
+                  disabled={loadingItems}
+                  onClick={() => handleOpenItems(inspectingPlaylist, true)}
+                  style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                  title="Re-fetch list from provider and re-match against libraries"
+                >
+                  <RefreshCw size={14} className={loadingItems ? 'animate-spin' : ''} />
+                  Re-evaluate
+                </button>
+                <button
+                  onClick={() => setInspectingPlaylist(null)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '50%',
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Metrics & Filter Bar */}
+            <div style={{
+              padding: '1rem 1.5rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(0, 0, 0, 0.15)',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '1rem',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              {/* Tab Pills */}
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  onClick={() => setItemsFilter('all')}
+                  style={{
+                    padding: '0.4rem 0.85rem',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: itemsFilter === 'all' ? 'var(--primary)' : 'rgba(255, 255, 255, 0.06)',
+                    color: itemsFilter === 'all' ? '#fff' : 'var(--text-muted)',
+                    fontSize: '0.85rem',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}
+                >
+                  All ({itemsData?.total_items || 0})
+                </button>
+                <button
+                  onClick={() => setItemsFilter('matched')}
+                  style={{
+                    padding: '0.4rem 0.85rem',
+                    borderRadius: '6px',
+                    background: itemsFilter === 'matched' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255, 255, 255, 0.06)',
+                    color: itemsFilter === 'matched' ? '#4ade80' : 'var(--text-muted)',
+                    fontSize: '0.85rem',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    border: itemsFilter === 'matched' ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid transparent'
+                  }}
+                >
+                  <CheckCircle2 size={14} /> Matched ({itemsData?.total_matched || 0})
+                </button>
+                <button
+                  onClick={() => setItemsFilter('unmatched')}
+                  style={{
+                    padding: '0.4rem 0.85rem',
+                    borderRadius: '6px',
+                    background: itemsFilter === 'unmatched' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.06)',
+                    color: itemsFilter === 'unmatched' ? '#f87171' : 'var(--text-muted)',
+                    fontSize: '0.85rem',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    border: itemsFilter === 'unmatched' ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid transparent'
+                  }}
+                >
+                  <XCircle size={14} /> Missing ({itemsData?.total_unmatched || 0})
+                </button>
+              </div>
+
+              {/* Server Filter & Quick Actions */}
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                {itemsData?.servers && itemsData.servers.length > 1 && (
+                  <select
+                    value={serverFilter}
+                    onChange={e => setServerFilter(e.target.value)}
+                    style={{
+                      padding: '0.4rem 0.75rem',
+                      fontSize: '0.85rem',
+                      borderRadius: '6px',
+                      background: 'rgba(0,0,0,0.3)',
+                      color: 'var(--text)',
+                      border: '1px solid rgba(255,255,255,0.1)'
+                    }}
+                  >
+                    <option value="all">All Media Servers</option>
+                    {itemsData.servers.map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                )}
+
+                {itemsData?.total_unmatched > 0 && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={handleCopyMissing}
+                    style={{
+                      padding: '0.4rem 0.75rem',
+                      fontSize: '0.8rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      borderColor: copiedMissing ? 'var(--success)' : 'rgba(255, 255, 255, 0.1)'
+                    }}
+                    title="Copy missing titles and IMDb/TMDb IDs to clipboard for Sonarr/Radarr"
+                  >
+                    {copiedMissing ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
+                    {copiedMissing ? 'Copied Missing Items!' : 'Copy Missing'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Search Input Bar */}
+            <div style={{
+              padding: '0.75rem 1.5rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(0, 0, 0, 0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              position: 'relative'
+            }}>
+              <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '2.25rem' }} />
+              <input
+                type="text"
+                placeholder="Search by title, show, year, IMDb ID (tt...), TMDb ID..."
+                value={itemsSearchQuery}
+                onChange={e => setItemsSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 1rem 0.5rem 2.25rem',
+                  fontSize: '0.85rem',
+                  borderRadius: '6px',
+                  background: 'rgba(0, 0, 0, 0.3)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  color: '#fff'
+                }}
+              />
+              {itemsSearchQuery && (
+                <button
+                  onClick={() => setItemsSearchQuery('')}
+                  style={{
+                    position: 'absolute',
+                    right: '2rem',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            {/* Scrollable Items List */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.5rem' }}>
+              {loadingItems ? (
+                <div style={{ textAlign: 'center', padding: '4rem 1rem', color: 'var(--text-muted)' }}>
+                  <Loader2 size={36} className="animate-spin" color="var(--primary)" style={{ margin: '0 auto 1rem' }} />
+                  <p style={{ margin: 0, fontSize: '0.95rem' }}>Analyzing library items & server matches...</p>
+                  <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem' }}>Cross-referencing provider IDs with Emby and Jellyfin...</p>
+                </div>
+              ) : filteredItems.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '4rem 1rem', color: 'var(--text-muted)' }}>
+                  <ListFilter size={40} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
+                  <p style={{ fontSize: '1rem', fontWeight: 500, margin: 0 }}>No items match your criteria</p>
+                  <p style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                    {itemsSearchQuery ? 'Try clearing or changing your search terms.' : 'No items found for the selected filter.'}
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {filteredItems.map(item => {
+                    const isMatched = item.matched;
+                    return (
+                      <div
+                        key={`${item.order}-${item.imdb_id || item.tmdb_id || item.title}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '1rem',
+                          padding: '0.75rem 1rem',
+                          borderRadius: '8px',
+                          background: isMatched ? 'rgba(255, 255, 255, 0.02)' : 'rgba(239, 68, 68, 0.04)',
+                          border: isMatched ? '1px solid rgba(255, 255, 255, 0.04)' : '1px solid rgba(239, 68, 68, 0.2)',
+                          transition: 'background 0.15s ease'
+                        }}
+                      >
+                        {/* Order Number */}
+                        <span style={{
+                          fontSize: '0.8rem',
+                          color: 'var(--text-muted)',
+                          width: '28px',
+                          textAlign: 'right',
+                          fontVariantNumeric: 'tabular-nums',
+                          fontWeight: 500
+                        }}>
+                          #{item.order}
+                        </span>
+
+                        {/* Media Type Icon */}
+                        <div style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '6px',
+                          background: item.media_type === 'episode' || item.show_title 
+                            ? 'rgba(168, 85, 247, 0.15)' 
+                            : 'rgba(59, 130, 246, 0.15)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: item.media_type === 'episode' || item.show_title ? '#c084fc' : '#60a5fa',
+                          flexShrink: 0
+                        }}>
+                          {item.media_type === 'episode' || item.show_title ? <Tv size={16} /> : <Film size={16} />}
+                        </div>
+
+                        {/* Title & Show / Episode Info */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 600, fontSize: '0.95rem', color: '#fff' }}>
+                              {item.title}
+                            </span>
+                            {item.year && (
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                ({item.year})
+                              </span>
+                            )}
+                          </div>
+
+                          {item.show_title && (
+                            <div style={{ fontSize: '0.8rem', color: '#c084fc', marginTop: '2px' }}>
+                              {item.show_title}
+                              {item.season_number != null && item.episode_number != null && (
+                                <span style={{ marginLeft: '0.35rem', color: 'var(--text-muted)' }}>
+                                  S{String(item.season_number).padStart(2, '0')}E{String(item.episode_number).padStart(2, '0')}
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* ID Chips */}
+                          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
+                            {item.imdb_id && (
+                              <button
+                                onClick={() => handleCopyId(item.imdb_id)}
+                                title={`Click to copy IMDb ID (${item.imdb_id})`}
+                                style={{
+                                  background: copiedId === item.imdb_id ? 'rgba(34, 197, 94, 0.2)' : 'rgba(234, 179, 8, 0.12)',
+                                  color: copiedId === item.imdb_id ? '#4ade80' : '#facc15',
+                                  border: '1px solid rgba(234, 179, 8, 0.25)',
+                                  borderRadius: '4px',
+                                  padding: '1px 6px',
+                                  fontSize: '0.7rem',
+                                  fontFamily: 'monospace',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}
+                              >
+                                {copiedId === item.imdb_id ? <Check size={10} /> : <Copy size={10} />}
+                                IMDb: {item.imdb_id}
+                              </button>
+                            )}
+                            {item.tmdb_id && (
+                              <button
+                                onClick={() => handleCopyId(String(item.tmdb_id))}
+                                title={`Click to copy TMDb ID (${item.tmdb_id})`}
+                                style={{
+                                  background: copiedId === String(item.tmdb_id) ? 'rgba(34, 197, 94, 0.2)' : 'rgba(59, 130, 246, 0.12)',
+                                  color: copiedId === String(item.tmdb_id) ? '#4ade80' : '#60a5fa',
+                                  border: '1px solid rgba(59, 130, 246, 0.25)',
+                                  borderRadius: '4px',
+                                  padding: '1px 6px',
+                                  fontSize: '0.7rem',
+                                  fontFamily: 'monospace',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}
+                              >
+                                {copiedId === String(item.tmdb_id) ? <Check size={10} /> : <Copy size={10} />}
+                                TMDb: {item.tmdb_id}
+                              </button>
+                            )}
+                            {item.tvdb_id && (
+                              <button
+                                onClick={() => handleCopyId(String(item.tvdb_id))}
+                                title={`Click to copy TVDb ID (${item.tvdb_id})`}
+                                style={{
+                                  background: copiedId === String(item.tvdb_id) ? 'rgba(34, 197, 94, 0.2)' : 'rgba(168, 85, 247, 0.12)',
+                                  color: copiedId === String(item.tvdb_id) ? '#4ade80' : '#c084fc',
+                                  border: '1px solid rgba(168, 85, 247, 0.25)',
+                                  borderRadius: '4px',
+                                  padding: '1px 6px',
+                                  fontSize: '0.7rem',
+                                  fontFamily: 'monospace',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}
+                              >
+                                {copiedId === String(item.tvdb_id) ? <Check size={10} /> : <Copy size={10} />}
+                                TVDb: {item.tvdb_id}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Per-server badges */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-end' }}>
+                          {item.servers && Object.entries(item.servers).map(([sName, sData]) => (
+                            <span
+                              key={sName}
+                              style={{
+                                fontSize: '0.72rem',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                background: sData.matched ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                color: sData.matched ? '#4ade80' : '#f87171',
+                                border: sData.matched ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                                fontWeight: 500
+                              }}
+                            >
+                              {sData.matched ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
+                              {sName}: {sData.matched ? 'In Library' : 'Missing'}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '0.85rem 1.5rem',
+              borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(0, 0, 0, 0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: '0.85rem',
+              color: 'var(--text-muted)'
+            }}>
+              <span>
+                Showing {filteredItems.length} of {itemsData?.total_items || 0} items
+                {itemsSearchQuery && ` (filtered by "${itemsSearchQuery}")`}
+              </span>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setInspectingPlaylist(null)}
+                style={{ padding: '0.4rem 1rem' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

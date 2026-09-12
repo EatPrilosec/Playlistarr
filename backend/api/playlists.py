@@ -8,7 +8,7 @@ import datetime
 from ..database import get_db
 from ..models import ListConfig, User
 from .auth import get_current_user
-from ..services.sync_engine import run_sync_background
+from ..services.sync_engine import run_sync_background, get_playlist_items_with_matches
 
 router = APIRouter(prefix="/api/playlists", tags=["playlists"])
 
@@ -142,6 +142,45 @@ async def get_playlist_status(playlist_id: int, db: Session = Depends(get_db)):
     if log:
         return {"status": log.status, "details": log.details, "last_sync": log.last_sync}
     return {"status": "pending", "details": "Waiting for first sync", "last_sync": None}
+
+@router.get("/{playlist_id}/items")
+async def get_playlist_items(
+    playlist_id: int,
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    config = db.query(ListConfig).filter(ListConfig.id == playlist_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+        
+    if not current_user.is_admin and config.user_id != current_user.id and not config.is_global:
+        raise HTTPException(status_code=403, detail="Not authorized to view this playlist's items")
+        
+    try:
+        data = await get_playlist_items_with_matches(db, config, force_refresh=refresh)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load items: {str(e)}")
+
+@router.post("/{playlist_id}/refresh-items")
+async def refresh_playlist_items(
+    playlist_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    config = db.query(ListConfig).filter(ListConfig.id == playlist_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+        
+    if not current_user.is_admin and config.user_id != current_user.id and not config.is_global:
+        raise HTTPException(status_code=403, detail="Not authorized to refresh this playlist's items")
+        
+    try:
+        data = await get_playlist_items_with_matches(db, config, force_refresh=True)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to refresh items: {str(e)}")
 
 @router.post("/{playlist_id}/sync")
 async def manual_sync_playlist(
