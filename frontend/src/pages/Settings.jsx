@@ -25,6 +25,13 @@ export default function Settings() {
   const [copySuccess, setCopySuccess] = useState(false);
   const [pollStatus, setPollStatus] = useState('');
 
+  // SIMKL State
+  const [simklStatus, setSimklStatus] = useState({ connected: false, username: null });
+  const [simklDeviceAuth, setSimklDeviceAuth] = useState(null);
+  const [simklLoading, setSimklLoading] = useState(false);
+  const [simklCopySuccess, setSimklCopySuccess] = useState(false);
+  const [simklPollStatus, setSimklPollStatus] = useState('');
+
   const fetchServers = async () => {
     try {
       const resp = await fetch('/api/settings/servers', {
@@ -64,9 +71,24 @@ export default function Settings() {
     }
   };
 
+  const fetchSimklStatus = async () => {
+    try {
+      const resp = await fetch('/api/settings/simkl/status', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setSimklStatus(data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     fetchServers();
     fetchTraktStatus();
+    fetchSimklStatus();
   }, []);
 
   // Poll Trakt Device Token when deviceAuth is active
@@ -101,6 +123,36 @@ export default function Settings() {
 
     return () => clearInterval(timer);
   }, [deviceAuth]);
+
+  // Poll SIMKL PIN when simklDeviceAuth is active
+  useEffect(() => {
+    if (!simklDeviceAuth?.user_code) return;
+
+    const interval = Math.max((simklDeviceAuth.interval || 5), 5) * 1000;
+    const timer = setInterval(async () => {
+      try {
+        const resp = await fetch('/api/settings/simkl/poll-pin', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify({ user_code: simklDeviceAuth.user_code })
+        });
+        const data = await resp.json();
+        if (data.status === 'authorized') {
+          setSimklDeviceAuth(null);
+          setSimklStatus({ connected: true, username: data.username });
+          setSimklPollStatus('');
+          clearInterval(timer);
+        }
+      } catch (err) {
+        console.error('SIMKL polling error:', err);
+      }
+    }, interval);
+
+    return () => clearInterval(timer);
+  }, [simklDeviceAuth]);
 
   const handleStartTraktAuth = async () => {
     setTraktLoading(true);
@@ -138,6 +190,44 @@ export default function Settings() {
       console.error(e);
     }
   };
+
+  const handleStartSimklAuth = async () => {
+    setSimklLoading(true);
+    setSimklPollStatus('');
+    try {
+      const resp = await fetch('/api/settings/simkl/pin', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.detail || 'Failed to request SIMKL PIN');
+      }
+      const data = await resp.json();
+      setSimklDeviceAuth(data);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSimklLoading(false);
+    }
+  };
+
+  const handleDisconnectSimkl = async () => {
+    if (!window.confirm('Are you sure you want to disconnect your SIMKL account?')) return;
+    try {
+      const resp = await fetch('/api/settings/simkl/disconnect', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (resp.ok) {
+        setSimklStatus({ connected: false, username: null });
+        setSimklDeviceAuth(null);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleCopyCode = async (text) => {
     if (!text) return;
     let copied = false;
@@ -506,6 +596,154 @@ export default function Settings() {
                   {pollStatus && (
                     <div style={{ marginTop: '0.75rem', color: 'var(--danger)', fontSize: '0.85rem' }}>
                       {pollStatus}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* SIMKL Account Section */}
+      <div style={{ marginTop: '4rem', marginBottom: '2rem' }}>
+        <h2 className="page-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Tv color="#e50914" /> SIMKL Account
+        </h2>
+        <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+          Connect your SIMKL account via browser PIN activation to sync your custom lists and watchlists.
+        </p>
+      </div>
+
+      <div className="glass-panel" style={{ padding: '2rem', maxWidth: '650px' }}>
+        {simklStatus.connected ? (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '50%',
+                  background: 'rgba(16, 185, 129, 0.15)',
+                  border: '1px solid rgba(16, 185, 129, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Check color="var(--success)" size={24} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '1.1rem', color: '#fff' }}>
+                    Connected to SIMKL
+                  </div>
+                  <div style={{ color: 'var(--primary)', fontSize: '0.9rem', marginTop: '0.2rem' }}>
+                    @{simklStatus.username}
+                  </div>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                style={{ color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                onClick={handleDisconnectSimkl}
+              >
+                <Unlink size={16} style={{ marginRight: '0.5rem' }} /> Disconnect
+              </button>
+            </div>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '1.5rem', marginBottom: 0 }}>
+              Your SIMKL account is active and authorized. Private lists and watchlists will sync with your account.
+            </p>
+          </div>
+        ) : (
+          <div>
+            {!simklDeviceAuth ? (
+              <div>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', fontSize: '0.95rem' }}>
+                  Authenticate Playlistarr with SIMKL using a one-time verification PIN code.
+                </p>
+                <button 
+                  type="button" 
+                  className="btn btn-primary" 
+                  onClick={handleStartSimklAuth} 
+                  disabled={simklLoading}
+                >
+                  <Tv size={18} style={{ marginRight: '0.5rem' }} />
+                  {simklLoading ? 'Requesting PIN...' : 'Connect SIMKL (PIN Code)'}
+                </button>
+              </div>
+            ) : (
+              <div className="animate-fade-in">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#fff' }}>Authorize on SIMKL</h3>
+                  <button 
+                    type="button" 
+                    className="btn btn-secondary" 
+                    style={{ padding: '0.3rem 0.8rem', fontSize: '0.85rem' }}
+                    onClick={() => setSimklDeviceAuth(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                <div style={{ background: 'rgba(0, 0, 0, 0.25)', borderRadius: '12px', padding: '1.5rem', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step 1</span>
+                    <div style={{ marginTop: '0.3rem' }}>
+                      <a 
+                        href={simklDeviceAuth.verification_url || "https://simkl.com/pin"} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="btn btn-secondary"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none', color: 'var(--primary)' }}
+                      >
+                        Open {simklDeviceAuth.verification_url || "simkl.com/pin"} <ExternalLink size={16} />
+                      </a>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '1.5rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step 2: Enter this PIN</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
+                      <span 
+                        onClick={() => handleCopyCode(simklDeviceAuth.user_code)}
+                        title="Click to copy"
+                        style={{
+                          fontFamily: 'monospace',
+                          fontSize: '1.75rem',
+                          fontWeight: 700,
+                          letterSpacing: '0.15em',
+                          background: 'rgba(99, 102, 241, 0.15)',
+                          border: '1px solid var(--primary)',
+                          padding: '0.5rem 1.25rem',
+                          borderRadius: '8px',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          userSelect: 'all'
+                        }}
+                      >
+                        {simklDeviceAuth.user_code}
+                      </span>
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary" 
+                        onClick={() => handleCopyCode(simklDeviceAuth.user_code)}
+                        title="Copy PIN"
+                      >
+                        {copySuccess ? <Check size={18} color="var(--success)" /> : <Copy size={18} />}
+                        <span style={{ marginLeft: '0.4rem', fontSize: '0.85rem', color: copySuccess ? 'var(--success)' : 'inherit' }}>
+                          {copySuccess ? 'Copied!' : 'Copy'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                    <RefreshCw size={16} className="animate-spin" />
+                    <span>Waiting for PIN authorization on SIMKL...</span>
+                  </div>
+                  {simklPollStatus && (
+                    <div style={{ marginTop: '0.75rem', color: 'var(--danger)', fontSize: '0.85rem' }}>
+                      {simklPollStatus}
                     </div>
                   )}
                 </div>

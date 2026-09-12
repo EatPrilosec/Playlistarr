@@ -266,7 +266,20 @@ export default function Dashboard() {
             </div>
             <div className="input-group">
               <label>Source List URL</label>
-              <input type="url" value={url} onChange={e => setUrl(e.target.value)} required placeholder="https://trakt.tv/users/..." />
+              <input 
+                type="url" 
+                value={url} 
+                onChange={e => setUrl(e.target.value)} 
+                required 
+                placeholder={
+                  provider === 'trakt' ? 'https://trakt.tv/users/username/lists/list-name' :
+                  provider === 'imdb' ? 'https://www.imdb.com/list/ls055592025/ or https://www.imdb.com/chart/top' :
+                  provider === 'mdblist' ? 'https://mdblist.com/lists/official/movies/justwatch-streaming-charts' :
+                  provider === 'simkl' ? 'https://simkl.com/movies/trending or https://simkl.com/5742139/list/6837' :
+                  provider === 'letterboxd' ? 'https://letterboxd.com/username/list/list-name/' :
+                  'https://...'
+                } 
+              />
             </div>
 
             {/* Artwork Section */}

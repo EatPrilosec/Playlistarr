@@ -251,3 +251,110 @@ async def disconnect_trakt(db: Session = Depends(get_db), current_user: User = D
     db.commit()
     return {"status": "ok", "connected": False}
 
+
+# --- SIMKL Device / PIN Endpoints ---
+
+class PollSimklPinRequest(BaseModel):
+    user_code: str
+
+@router.get("/simkl/status")
+async def get_simkl_status(db: Session = Depends(get_db)):
+    token_setting = db.query(AppSetting).filter(AppSetting.key == "simkl_access_token").first()
+    username_setting = db.query(AppSetting).filter(AppSetting.key == "simkl_username").first()
+    is_connected = bool(token_setting and token_setting.value)
+    return {
+        "connected": is_connected,
+        "username": username_setting.value if (is_connected and username_setting) else None
+    }
+
+@router.post("/simkl/pin")
+async def create_simkl_pin(current_user: User = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    client_id = os.getenv("SIMKL_CLIENT_ID", "62a587ec2a82dbed02c6ab48b923d72e775cb1096d2de60d04502413e36ef100")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            resp = await client.get(
+                f"https://api.simkl.com/oauth/pin?client_id={client_id}&redirect=https://simkl.com"
+            )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail=f"SIMKL API error: {resp.text[:100]}")
+            data = resp.json()
+            return {
+                "user_code": data["user_code"],
+                "verification_url": data.get("verification_url", "https://simkl.com/pin"),
+                "expires_in": data.get("expires_in", 900),
+                "interval": data.get("interval", 5)
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/simkl/poll-pin")
+async def poll_simkl_pin(req: PollSimklPinRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    client_id = os.getenv("SIMKL_CLIENT_ID", "62a587ec2a82dbed02c6ab48b923d72e775cb1096d2de60d04502413e36ef100")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            resp = await client.get(
+                f"https://api.simkl.com/oauth/pin/{req.user_code}?client_id={client_id}"
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("result") == "OK":
+                    access_token = data.get("access_token")
+                    username = "SIMKLUser"
+                    
+                    # Fetch user settings for real name
+                    try:
+                        u_resp = await client.get(
+                            "https://api.simkl.com/users/settings",
+                            headers={
+                                "simkl-api-key": client_id,
+                                "Authorization": f"Bearer {access_token}"
+                            }
+                        )
+                        if u_resp.status_code == 200:
+                            username = u_resp.json().get("user", {}).get("name") or username
+                    except Exception:
+                        pass
+
+                    settings_to_update = {
+                        "simkl_access_token": access_token,
+                        "simkl_username": username
+                    }
+                    for k, v in settings_to_update.items():
+                        s = db.query(AppSetting).filter(AppSetting.key == k).first()
+                        if not s:
+                            s = AppSetting(key=k, value=str(v))
+                            db.add(s)
+                        else:
+                            s.value = str(v)
+                    db.commit()
+                    return {"status": "authorized", "username": username}
+                elif data.get("result") == "KO":
+                    return {"status": "pending"}
+                else:
+                    return {"status": "pending"}
+            else:
+                return {"status": "pending"}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
+
+@router.post("/simkl/disconnect")
+async def disconnect_simkl(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    keys = ["simkl_access_token", "simkl_username"]
+    for k in keys:
+        s = db.query(AppSetting).filter(AppSetting.key == k).first()
+        if s:
+            db.delete(s)
+    db.commit()
+    return {"status": "ok", "connected": False}
+
