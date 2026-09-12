@@ -82,7 +82,40 @@ export default function Dashboard() {
     }
   };
 
-  const handleCopyMissing = () => {
+  const copyToClipboard = async (text) => {
+    if (!text) return false;
+    let copied = false;
+    // 1. Try modern navigator.clipboard if available (HTTPS / Secure context)
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (err) {
+        console.warn('navigator.clipboard failed, falling back:', err);
+      }
+    }
+    // 2. Fallback to execCommand for HTTP / LAN contexts
+    if (!copied) {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        copied = document.execCommand('copy');
+        document.body.removeChild(textarea);
+      } catch (err) {
+        console.error('execCommand copy failed:', err);
+      }
+    }
+    return copied;
+  };
+
+  const handleCopyMissing = async () => {
     if (!itemsData || !itemsData.items) return;
     const missing = itemsData.items.filter(it => {
       if (serverFilter === 'all') return !it.matched;
@@ -102,14 +135,17 @@ export default function Dashboard() {
         return `• #${it.order} ${it.title}${ep} (${it.year || 'N/A'})${idStr}`;
       })
     ];
-    navigator.clipboard.writeText(lines.join('\n'));
+    await copyToClipboard(lines.join('\n'));
     setCopiedMissing(true);
     setTimeout(() => setCopiedMissing(false), 2500);
   };
 
-  const handleCopyId = (idText) => {
-    navigator.clipboard.writeText(idText);
-    setCopiedId(idText);
+  const handleCopyId = async (idText, e) => {
+    if (e) e.stopPropagation();
+    const str = String(idText || '').trim();
+    if (!str) return;
+    await copyToClipboard(str);
+    setCopiedId(str);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -1298,68 +1334,95 @@ export default function Dashboard() {
                           <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
                             {item.imdb_id && (
                               <button
-                                onClick={() => handleCopyId(item.imdb_id)}
+                                type="button"
+                                onClick={(e) => handleCopyId(item.imdb_id, e)}
                                 title={`Click to copy IMDb ID (${item.imdb_id})`}
                                 style={{
                                   background: copiedId === item.imdb_id ? 'rgba(34, 197, 94, 0.2)' : 'rgba(234, 179, 8, 0.12)',
                                   color: copiedId === item.imdb_id ? '#4ade80' : '#facc15',
-                                  border: '1px solid rgba(234, 179, 8, 0.25)',
+                                  border: copiedId === item.imdb_id ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(234, 179, 8, 0.25)',
                                   borderRadius: '4px',
-                                  padding: '1px 6px',
-                                  fontSize: '0.7rem',
+                                  padding: '2px 7px',
+                                  fontSize: '0.72rem',
                                   fontFamily: 'monospace',
                                   cursor: 'pointer',
                                   display: 'flex',
                                   alignItems: 'center',
-                                  gap: '3px'
+                                  gap: '4px',
+                                  transition: 'all 0.15s ease'
                                 }}
                               >
-                                {copiedId === item.imdb_id ? <Check size={10} /> : <Copy size={10} />}
-                                IMDb: {item.imdb_id}
+                                {copiedId === item.imdb_id ? (
+                                  <>
+                                    <Check size={11} color="var(--success)" /> Copied!
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy size={11} /> IMDb: {item.imdb_id}
+                                  </>
+                                )}
                               </button>
                             )}
                             {item.tmdb_id && (
                               <button
-                                onClick={() => handleCopyId(String(item.tmdb_id))}
+                                type="button"
+                                onClick={(e) => handleCopyId(String(item.tmdb_id), e)}
                                 title={`Click to copy TMDb ID (${item.tmdb_id})`}
                                 style={{
                                   background: copiedId === String(item.tmdb_id) ? 'rgba(34, 197, 94, 0.2)' : 'rgba(59, 130, 246, 0.12)',
                                   color: copiedId === String(item.tmdb_id) ? '#4ade80' : '#60a5fa',
-                                  border: '1px solid rgba(59, 130, 246, 0.25)',
+                                  border: copiedId === String(item.tmdb_id) ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(59, 130, 246, 0.25)',
                                   borderRadius: '4px',
-                                  padding: '1px 6px',
-                                  fontSize: '0.7rem',
+                                  padding: '2px 7px',
+                                  fontSize: '0.72rem',
                                   fontFamily: 'monospace',
                                   cursor: 'pointer',
                                   display: 'flex',
                                   alignItems: 'center',
-                                  gap: '3px'
+                                  gap: '4px',
+                                  transition: 'all 0.15s ease'
                                 }}
                               >
-                                {copiedId === String(item.tmdb_id) ? <Check size={10} /> : <Copy size={10} />}
-                                TMDb: {item.tmdb_id}
+                                {copiedId === String(item.tmdb_id) ? (
+                                  <>
+                                    <Check size={11} color="var(--success)" /> Copied!
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy size={11} /> TMDb: {item.tmdb_id}
+                                  </>
+                                )}
                               </button>
                             )}
                             {item.tvdb_id && (
                               <button
-                                onClick={() => handleCopyId(String(item.tvdb_id))}
+                                type="button"
+                                onClick={(e) => handleCopyId(String(item.tvdb_id), e)}
                                 title={`Click to copy TVDb ID (${item.tvdb_id})`}
                                 style={{
                                   background: copiedId === String(item.tvdb_id) ? 'rgba(34, 197, 94, 0.2)' : 'rgba(168, 85, 247, 0.12)',
                                   color: copiedId === String(item.tvdb_id) ? '#4ade80' : '#c084fc',
-                                  border: '1px solid rgba(168, 85, 247, 0.25)',
+                                  border: copiedId === String(item.tvdb_id) ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(168, 85, 247, 0.25)',
                                   borderRadius: '4px',
-                                  padding: '1px 6px',
-                                  fontSize: '0.7rem',
+                                  padding: '2px 7px',
+                                  fontSize: '0.72rem',
                                   fontFamily: 'monospace',
                                   cursor: 'pointer',
                                   display: 'flex',
                                   alignItems: 'center',
-                                  gap: '3px'
+                                  gap: '4px',
+                                  transition: 'all 0.15s ease'
                                 }}
                               >
-                                {copiedId === String(item.tvdb_id) ? <Check size={10} /> : <Copy size={10} />}
-                                TVDb: {item.tvdb_id}
+                                {copiedId === String(item.tvdb_id) ? (
+                                  <>
+                                    <Check size={11} color="var(--success)" /> Copied!
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy size={11} /> TVDb: {item.tvdb_id}
+                                  </>
+                                )}
                               </button>
                             )}
                           </div>
@@ -1370,6 +1433,7 @@ export default function Dashboard() {
                           <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
                             {!isMatched && (item.media_type === 'episode' || item.show_title || item.tvdb_id) && arrConfig?.sonarr?.configured && (
                               <button
+                                type="button"
                                 onClick={() => handleAddSingleItemToArr(item, 'sonarr')}
                                 disabled={itemArrStatus[item.order]?.loading}
                                 style={{
@@ -1386,13 +1450,25 @@ export default function Dashboard() {
                                 }}
                                 title="Add TV series to Sonarr"
                               >
-                                {itemArrStatus[item.order]?.loading ? <Loader2 size={11} className="animate-spin" /> : itemArrStatus[item.order]?.success ? <Check size={11} /> : <Plus size={11} />}
-                                {itemArrStatus[item.order]?.message || '+ Sonarr'}
+                                {itemArrStatus[item.order]?.loading ? (
+                                  <>
+                                    <Loader2 size={11} className="animate-spin" /> Adding...
+                                  </>
+                                ) : itemArrStatus[item.order]?.success ? (
+                                  <>
+                                    <Check size={11} /> {itemArrStatus[item.order]?.message || 'Added'}
+                                  </>
+                                ) : (
+                                  <>
+                                    <Plus size={11} /> Sonarr
+                                  </>
+                                )}
                               </button>
                             )}
 
                             {!isMatched && !(item.media_type === 'episode' || item.show_title || item.tvdb_id) && arrConfig?.radarr?.configured && (
                               <button
+                                type="button"
                                 onClick={() => handleAddSingleItemToArr(item, 'radarr')}
                                 disabled={itemArrStatus[item.order]?.loading}
                                 style={{
@@ -1409,8 +1485,19 @@ export default function Dashboard() {
                                 }}
                                 title="Add movie to Radarr"
                               >
-                                {itemArrStatus[item.order]?.loading ? <Loader2 size={11} className="animate-spin" /> : itemArrStatus[item.order]?.success ? <Check size={11} /> : <Plus size={11} />}
-                                {itemArrStatus[item.order]?.message || '+ Radarr'}
+                                {itemArrStatus[item.order]?.loading ? (
+                                  <>
+                                    <Loader2 size={11} className="animate-spin" /> Adding...
+                                  </>
+                                ) : itemArrStatus[item.order]?.success ? (
+                                  <>
+                                    <Check size={11} /> {itemArrStatus[item.order]?.message || 'Added'}
+                                  </>
+                                ) : (
+                                  <>
+                                    <Plus size={11} /> Radarr
+                                  </>
+                                )}
                               </button>
                             )}
                           </div>
