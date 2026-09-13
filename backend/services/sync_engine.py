@@ -37,19 +37,23 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                 matched_ids = []
                 sem = asyncio.Semaphore(10)
                 
-                async with httpx.AsyncClient(timeout=15.0) as http_client:
+                async with httpx.AsyncClient(timeout=30.0) as http_client:
                     async def match_item(it):
                         async with sem:
-                            return await ms_client.search_item(
-                                title=it.get("title"),
-                                year=it.get("year"),
-                                item_type=it.get("type"),
-                                imdb_id=it.get("imdb_id"),
-                                tmdb_id=it.get("tmdb_id"),
-                                tvdb_id=it.get("tvdb_id"),
-                                show_title=it.get("show_title"),
-                                client=http_client
-                            )
+                            try:
+                                return await ms_client.search_item(
+                                    title=it.get("title"),
+                                    year=it.get("year"),
+                                    item_type=it.get("type"),
+                                    imdb_id=it.get("imdb_id"),
+                                    tmdb_id=it.get("tmdb_id"),
+                                    tvdb_id=it.get("tvdb_id"),
+                                    show_title=it.get("show_title"),
+                                    client=http_client
+                                )
+                            except Exception as item_err:
+                                print(f"Error matching item '{it.get('title')}': {item_err}")
+                                return None
                     
                     search_results = await asyncio.gather(*(match_item(it) for it in items))
                     server_matches[server.name] = search_results
@@ -62,10 +66,19 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                         "Banner": list_config.banner_url
                     }
                     if list_config.is_global:
-                        # Push to all users on this server as public/global playlists
-                        users = await ms_client.get_users()
-                        for u in users:
-                            await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=u.get("Id"), images=images, is_public=True)
+                        # For global playlists: create ONCE on the server as public
+                        if ms_client.server_type == "jellyfin":
+                            users = await ms_client.get_users()
+                            admin_id = None
+                            for u in users:
+                                if u.get("Policy", {}).get("IsAdministrator"):
+                                    admin_id = u.get("Id")
+                                    break
+                            admin_id = admin_id or (users[0].get("Id") if users else None)
+                            await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=admin_id, images=images, is_public=True)
+                        else:
+                            # Emby: create once at server level without user_id for a true public playlist
+                            await ms_client.create_or_update_playlist(list_config.name, matched_ids, user_id=None, images=images, is_public=True)
                     else:
                         if list_config.target_username:
                             users = await ms_client.get_users()
@@ -90,7 +103,8 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                             
                 results.append(f"{server.name}: {len(matched_ids)}/{len(items)} matched")
             except Exception as se:
-                results.append(f"{server.name}: Error ({str(se)})")
+                err_msg = str(se).strip() or type(se).__name__
+                results.append(f"{server.name}: Error ({err_msg})")
 
         # Build item details with per-server match status
         item_details = []
@@ -189,19 +203,23 @@ async def get_playlist_items_with_matches(db: Session, list_config: ListConfig, 
     for server in servers:
         ms_client = MediaServerClient(server.url, server.api_key, server.server_type)
         sem = asyncio.Semaphore(10)
-        async with httpx.AsyncClient(timeout=15.0) as http_client:
+        async with httpx.AsyncClient(timeout=30.0) as http_client:
             async def match_item(it):
                 async with sem:
-                    return await ms_client.search_item(
-                        title=it.get("title"),
-                        year=it.get("year"),
-                        item_type=it.get("type"),
-                        imdb_id=it.get("imdb_id"),
-                        tmdb_id=it.get("tmdb_id"),
-                        tvdb_id=it.get("tvdb_id"),
-                        show_title=it.get("show_title"),
-                        client=http_client
-                    )
+                    try:
+                        return await ms_client.search_item(
+                            title=it.get("title"),
+                            year=it.get("year"),
+                            item_type=it.get("type"),
+                            imdb_id=it.get("imdb_id"),
+                            tmdb_id=it.get("tmdb_id"),
+                            tvdb_id=it.get("tvdb_id"),
+                            show_title=it.get("show_title"),
+                            client=http_client
+                        )
+                    except Exception as item_err:
+                        print(f"Error matching item '{it.get('title')}': {item_err}")
+                        return None
             search_results = await asyncio.gather(*(match_item(it) for it in items))
             server_matches[server.name] = search_results
 

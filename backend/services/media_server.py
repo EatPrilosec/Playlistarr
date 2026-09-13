@@ -209,17 +209,22 @@ class MediaServerClient:
 
     async def create_or_update_playlist(self, name: str, item_ids: list[str], user_id: str = None, images: dict = None, is_public: bool = True):
         """Creates a playlist or updates an existing one, and sets custom artwork if provided"""
-        if not user_id:
+        # For private playlists or Jellyfin public playlists, resolve target user ID
+        if not user_id and (self.server_type == "jellyfin" or not is_public):
             users = await self.get_users()
-            if users:
-                user_id = users[0]["Id"]
-            else:
+            admin_u = None
+            for u in users:
+                if u.get("Policy", {}).get("IsAdministrator"):
+                    admin_u = u.get("Id")
+                    break
+            user_id = admin_u or (users[0]["Id"] if users else None)
+            if not user_id and not is_public:
                 raise Exception("No users found on media server to assign playlist")
                 
-        # First check if playlist exists for this user
+        # First check if playlist exists for this user or server-wide
         url = f"{self.server_url}/Users/{user_id}/Items" if user_id else f"{self.server_url}/Items"
         check_urls = [url]
-        if self.server_type == "jellyfin" or not user_id:
+        if self.server_type == "jellyfin" or not user_id or is_public:
             global_url = f"{self.server_url}/Items"
             if global_url not in check_urls:
                 check_urls.append(global_url)
@@ -231,7 +236,7 @@ class MediaServerClient:
         }
             
         existing_ids = []
-        async with httpx.AsyncClient(headers=self.headers, timeout=15.0) as client:
+        async with httpx.AsyncClient(headers=self.headers, timeout=90.0) as client:
             seen_existing = set()
             for cur_url in check_urls:
                 try:
@@ -255,9 +260,9 @@ class MediaServerClient:
                     print(f"Error removing existing playlist {old_id}: {de}")
             
             create_url = f"{self.server_url}/Playlists"
-            create_params = {
-                "userId": user_id
-            }
+            create_params = {}
+            if user_id:
+                create_params["userId"] = user_id
             
             # If items count <= 100, pass Ids directly to create
             if item_ids and len(item_ids) <= 100:
@@ -265,9 +270,10 @@ class MediaServerClient:
 
             create_body = {
                 "Name": name,
-                "UserId": user_id,
                 "IsPublic": is_public
             }
+            if user_id:
+                create_body["UserId"] = user_id
             if not is_public and user_id:
                 create_body["Users"] = [
                     {"UserId": user_id, "CanEdit": True}
@@ -286,9 +292,10 @@ class MediaServerClient:
                     chunk = item_ids[i:i + chunk_size]
                     add_url = f"{self.server_url}/Playlists/{new_playlist_id}/Items"
                     add_params = {
-                        "userId": user_id,
                         "ids": ",".join(chunk)
                     }
+                    if user_id:
+                        add_params["userId"] = user_id
                     add_resp = await client.post(add_url, params=add_params)
                     if add_resp.status_code not in [200, 204]:
                         raise Exception(f"Failed to add items batch to playlist: {add_resp.status_code} {add_resp.text}")
