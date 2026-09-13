@@ -14,10 +14,7 @@ def get_database_url():
                 shutil.copy2("/app/data/playlistarr.db", "/config/playlistarr.db")
             except Exception as e:
                 print(f"Error copying db from /app/data to /config: {e}")
-        return "sqlite:////config/playlistarr.db"
-    if os.path.exists("/DockerData/playlistarr/config"):
-        return "sqlite:////DockerData/playlistarr/config/playlistarr.db"
-    return "sqlite:///./playlistarr.db"
+    return "sqlite:////config/playlistarr.db"
 
 DATABASE_URL = get_database_url()
 
