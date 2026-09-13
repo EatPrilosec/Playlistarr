@@ -336,6 +336,100 @@ async def export_playlist(
         headers={"Content-Disposition": f'attachment; filename="{config.name}.json"'}
     )
 
+@router.get("/{playlist_id}/arr-import/{arr_type}")
+@router.get("/{playlist_id}/arr-import")
+async def get_arr_custom_list(
+    playlist_id: int,
+    arr_type: Optional[str] = None,
+    type: Optional[str] = None,
+    missing_only: bool = False,
+    db: Session = Depends(get_db)
+):
+    """
+    Public Custom List endpoint compatible with Sonarr (CustomImport) and Radarr (RadarrListImport).
+    - Sonarr: Returns JSON array of series objects [{"tvdbId": 12345, "title": "Series Name"}]
+    - Radarr: Returns JSON array of movie objects [{"id": 12345, "title": "Movie Name", "release_date": "YYYY-MM-DD"}]
+    """
+    target_type = (arr_type or type or "radarr").lower().strip()
+    config = db.query(ListConfig).filter(ListConfig.id == playlist_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    items = []
+    if config.last_items_json:
+        try:
+            items = json.loads(config.last_items_json)
+        except Exception:
+            items = []
+
+    if not items:
+        try:
+            from ..services.providers.factory import get_provider
+            provider = get_provider(config.source_url, config.provider)
+            items = await provider.fetch_list()
+        except Exception:
+            items = []
+
+    results = []
+    if target_type == "sonarr":
+        seen_tvdb = set()
+        for item in items:
+            m_type = (item.get("type") or "").lower()
+            is_tv = m_type in ("show", "episode", "series") or bool(item.get("show_title")) or bool(item.get("tvdb_id"))
+            if not is_tv:
+                continue
+
+            if missing_only and item.get("matched", False):
+                continue
+
+            raw_tvdb = item.get("tvdb_id")
+            try:
+                tvdb_id = int(raw_tvdb)
+            except (ValueError, TypeError):
+                tvdb_id = 0
+
+            if tvdb_id <= 0 or tvdb_id in seen_tvdb:
+                continue
+
+            seen_tvdb.add(tvdb_id)
+            title = item.get("show_title") or item.get("title") or f"TvdbId: {tvdb_id}"
+            results.append({
+                "tvdbId": tvdb_id,
+                "title": title
+            })
+    else:
+        # Radarr
+        seen_tmdb = set()
+        for item in items:
+            m_type = (item.get("type") or "").lower()
+            is_tv = m_type in ("show", "episode", "series") or bool(item.get("show_title"))
+            if is_tv:
+                continue
+
+            if missing_only and item.get("matched", False):
+                continue
+
+            raw_tmdb = item.get("tmdb_id") or item.get("id")
+            try:
+                tmdb_id = int(raw_tmdb)
+            except (ValueError, TypeError):
+                tmdb_id = 0
+
+            if tmdb_id <= 0 or tmdb_id in seen_tmdb:
+                continue
+
+            seen_tmdb.add(tmdb_id)
+            entry = {
+                "id": tmdb_id,
+                "title": item.get("title") or f"TmdbId: {tmdb_id}"
+            }
+            year = item.get("year")
+            if year:
+                entry["release_date"] = f"{year}-01-01"
+            results.append(entry)
+
+    return JSONResponse(content=results)
+
 
 # --- Radarr & Sonarr Automation Endpoints ---
 

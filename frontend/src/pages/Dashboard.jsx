@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Plus, Settings, RefreshCw, Trash2, ListVideo, Edit2, Download, 
   Image as ImageIcon, Upload, X, Loader2, ListFilter, CheckCircle2, 
-  XCircle, Search, Copy, Check, Film, Tv, ExternalLink 
+  XCircle, Search, Copy, Check, Film, Tv, ExternalLink, Link2 
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -52,6 +52,12 @@ export default function Dashboard() {
   const [addingToArr, setAddingToArr] = useState(false);
   const [arrActionResult, setArrActionResult] = useState(null);
   const [itemArrStatus, setItemArrStatus] = useState({});
+
+  // Arr Custom List URLs Modal State
+  const [arrUrlsModalPlaylist, setArrUrlsModalPlaylist] = useState(null);
+  const [arrUrlsMissingOnly, setArrUrlsMissingOnly] = useState(false);
+  const [copiedRadarrUrl, setCopiedRadarrUrl] = useState(false);
+  const [copiedSonarrUrl, setCopiedSonarrUrl] = useState(false);
 
   const handleOpenItems = async (playlist, forceRefresh = false) => {
     setInspectingPlaylist(playlist);
@@ -422,6 +428,31 @@ export default function Dashboard() {
       }
     } catch (err) {
       console.error('Export failed:', err);
+    }
+  };
+
+  const getArrImportUrl = (playlistId, arrType, missingOnly) => {
+    const origin = window.location.origin;
+    let u = `${origin}/api/playlists/${playlistId}/arr-import/${arrType}`;
+    if (missingOnly) {
+      u += '?missing_only=true';
+    }
+    return u;
+  };
+
+  const handleCopyArrUrl = async (playlistId, arrType) => {
+    const urlToCopy = getArrImportUrl(playlistId, arrType, arrUrlsMissingOnly);
+    try {
+      await navigator.clipboard.writeText(urlToCopy);
+      if (arrType === 'radarr') {
+        setCopiedRadarrUrl(true);
+        setTimeout(() => setCopiedRadarrUrl(false), 2500);
+      } else {
+        setCopiedSonarrUrl(true);
+        setTimeout(() => setCopiedSonarrUrl(false), 2500);
+      }
+    } catch (err) {
+      console.error('Failed to copy Arr URL:', err);
     }
   };
 
@@ -925,6 +956,19 @@ export default function Dashboard() {
                   <button className="btn btn-secondary" style={{ padding: '0.4rem', borderRadius: '6px' }} title="Export Playlist (JSON)" onClick={() => handleExport(p)}>
                     <Download size={16} />
                   </button>
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ padding: '0.4rem', borderRadius: '6px' }} 
+                    title="Sonarr & Radarr Custom List URLs" 
+                    onClick={() => {
+                      setArrUrlsModalPlaylist(p);
+                      setArrUrlsMissingOnly(false);
+                      setCopiedRadarrUrl(false);
+                      setCopiedSonarrUrl(false);
+                    }}
+                  >
+                    <Link2 size={16} />
+                  </button>
                   <button className="btn btn-secondary" style={{ padding: '0.4rem', borderRadius: '6px' }} title="Edit" onClick={() => handleEdit(p)}>
                     <Edit2 size={16} />
                   </button>
@@ -1138,6 +1182,26 @@ export default function Dashboard() {
                     {copiedMissing ? 'Copied Missing Items!' : 'Copy Missing'}
                   </button>
                 )}
+
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setArrUrlsModalPlaylist(inspectingPlaylist);
+                    setArrUrlsMissingOnly(false);
+                    setCopiedRadarrUrl(false);
+                    setCopiedSonarrUrl(false);
+                  }}
+                  style={{
+                    padding: '0.4rem 0.75rem',
+                    fontSize: '0.8rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem'
+                  }}
+                  title="Get Sonarr & Radarr Custom List URLs for this playlist"
+                >
+                  <Link2 size={14} /> Custom Lists
+                </button>
 
                 {(arrConfig?.radarr?.configured || arrConfig?.sonarr?.configured) && itemsData?.total_unmatched > 0 && (
                   <button
@@ -1551,6 +1615,248 @@ export default function Dashboard() {
                 style={{ padding: '0.4rem 1rem' }}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sonarr & Radarr Custom List URLs Modal */}
+      {arrUrlsModalPlaylist && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          zIndex: 1100,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1.5rem'
+        }}>
+          <div className="glass-panel" style={{
+            width: '100%',
+            maxWidth: '680px',
+            borderRadius: '16px',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.85)',
+            overflow: 'hidden',
+            background: 'var(--bg-card, #111827)'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'rgba(0, 0, 0, 0.2)'
+            }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <Link2 size={20} color="var(--primary)" />
+                  <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 600 }}>Custom List URLs</h3>
+                  <span style={{
+                    fontSize: '0.7rem',
+                    textTransform: 'uppercase',
+                    background: 'rgba(99, 102, 241, 0.15)',
+                    color: 'var(--primary)',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontWeight: 600,
+                    border: '1px solid rgba(99, 102, 241, 0.3)'
+                  }}>
+                    {arrUrlsModalPlaylist.provider}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                  {arrUrlsModalPlaylist.name}
+                </div>
+              </div>
+
+              <button
+                onClick={() => setArrUrlsModalPlaylist(null)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '50%',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div style={{
+                background: 'rgba(99, 102, 241, 0.08)',
+                border: '1px solid rgba(99, 102, 241, 0.2)',
+                borderRadius: '8px',
+                padding: '0.85rem 1rem',
+                fontSize: '0.85rem',
+                color: 'var(--text)',
+                lineHeight: 1.45
+              }}>
+                Paste these URLs directly into Radarr or Sonarr to automatically import and monitor items from this playlist.
+              </div>
+
+              {/* Missing only toggle */}
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                background: 'rgba(255, 255, 255, 0.03)',
+                padding: '0.65rem 0.85rem',
+                borderRadius: '8px',
+                border: '1px solid rgba(255, 255, 255, 0.06)'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={arrUrlsMissingOnly}
+                  onChange={(e) => setArrUrlsMissingOnly(e.target.checked)}
+                  style={{ cursor: 'pointer' }}
+                />
+                <span>
+                  <strong>Only import missing items</strong>
+                  <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Excludes items already matched on your media servers.
+                  </span>
+                </span>
+              </label>
+
+              {/* Radarr Section */}
+              <div style={{
+                background: 'rgba(0, 0, 0, 0.2)',
+                borderRadius: '10px',
+                border: '1px solid rgba(255, 255, 255, 0.07)',
+                padding: '1rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Film size={16} color="#fbbf24" />
+                    <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>Radarr (Movies)</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>• Type: Custom Lists</span>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Settings → Import Lists → + → Custom Lists
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    value={getArrImportUrl(arrUrlsModalPlaylist.id, 'radarr', arrUrlsMissingOnly)}
+                    style={{
+                      flex: 1,
+                      padding: '0.5rem 0.75rem',
+                      background: 'rgba(0, 0, 0, 0.4)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      borderRadius: '6px',
+                      color: 'var(--text)',
+                      fontSize: '0.82rem',
+                      fontFamily: 'monospace'
+                    }}
+                    onClick={(e) => e.target.select()}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => handleCopyArrUrl(arrUrlsModalPlaylist.id, 'radarr')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      padding: '0.5rem 0.9rem',
+                      fontSize: '0.82rem',
+                      whiteSpace: 'nowrap',
+                      background: copiedRadarrUrl ? 'var(--success, #22c55e)' : undefined
+                    }}
+                  >
+                    {copiedRadarrUrl ? <Check size={15} /> : <Copy size={15} />}
+                    {copiedRadarrUrl ? 'Copied!' : 'Copy URL'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Sonarr Section */}
+              <div style={{
+                background: 'rgba(0, 0, 0, 0.2)',
+                borderRadius: '10px',
+                border: '1px solid rgba(255, 255, 255, 0.07)',
+                padding: '1rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Tv size={16} color="#38bdf8" />
+                    <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>Sonarr (TV Series)</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>• Type: Custom List</span>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Settings → Import Lists → + → Custom List
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    value={getArrImportUrl(arrUrlsModalPlaylist.id, 'sonarr', arrUrlsMissingOnly)}
+                    style={{
+                      flex: 1,
+                      padding: '0.5rem 0.75rem',
+                      background: 'rgba(0, 0, 0, 0.4)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      borderRadius: '6px',
+                      color: 'var(--text)',
+                      fontSize: '0.82rem',
+                      fontFamily: 'monospace'
+                    }}
+                    onClick={(e) => e.target.select()}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => handleCopyArrUrl(arrUrlsModalPlaylist.id, 'sonarr')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      padding: '0.5rem 0.9rem',
+                      fontSize: '0.82rem',
+                      whiteSpace: 'nowrap',
+                      background: copiedSonarrUrl ? 'var(--success, #22c55e)' : undefined
+                    }}
+                  >
+                    {copiedSonarrUrl ? <Check size={15} /> : <Copy size={15} />}
+                    {copiedSonarrUrl ? 'Copied!' : 'Copy URL'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '1rem 1.5rem',
+              borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(0, 0, 0, 0.25)',
+              display: 'flex',
+              justifyContent: 'flex-end'
+            }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setArrUrlsModalPlaylist(null)}
+                style={{ padding: '0.45rem 1.25rem' }}
+              >
+                Done
               </button>
             </div>
           </div>

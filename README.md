@@ -138,6 +138,33 @@ Access the Web UI at `http://<your-server-ip>:8671`.
 
 ---
 
+## 📺 Radarr & Sonarr Custom List Integration
+
+Playlistarr natively serves as a **Custom List** import source for both Radarr and Sonarr, allowing the `*Arr` apps to automatically monitor and download items from your curated playlists.
+
+### Radarr Setup:
+1. In Playlistarr, click the **Custom List URLs** icon (<kbd>🔗</kbd>) on any playlist card (or inside the Matches inspection view).
+2. Click **Copy URL** under the **Radarr (Movies)** section:
+   ```
+   http://<your-playlistarr-ip>:8671/api/playlists/<id>/arr-import/radarr
+   ```
+3. In Radarr, go to **Settings** → **Import Lists** → click **+** → choose **Custom Lists**.
+4. Paste the URL into the **List URL** field, choose your Quality Profile and Root Folder, and click **Test** & **Save**.
+
+### Sonarr Setup:
+1. In Playlistarr, click the **Custom List URLs** icon (<kbd>🔗</kbd>) on any playlist card (or inside the Matches inspection view).
+2. Click **Copy URL** under the **Sonarr (TV Series)** section:
+   ```
+   http://<your-playlistarr-ip>:8671/api/playlists/<id>/arr-import/sonarr
+   ```
+3. In Sonarr, go to **Settings** → **Import Lists** → click **+** → choose **Custom List**.
+4. Paste the URL into the **List URL** field, choose your Quality Profile and Root Folder, and click **Test** & **Save**.
+
+> [!TIP]
+> Toggle **"Only import missing items"** in the Playlistarr modal to generate URLs that only serve items missing from your media servers (`?missing_only=true`).
+
+---
+
 ## 🛠️ Local Development
 
 ### Backend (Python 3.11+ / FastAPI)
