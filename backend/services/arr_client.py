@@ -154,6 +154,67 @@ class RadarrClient:
             else:
                 raise Exception(f"Radarr returned HTTP {resp.status_code}: {resp.text[:120]}")
 
+    async def get_import_lists(self) -> List[Dict[str, Any]]:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{self.url}/api/v3/importlist", headers=self.headers)
+            if resp.status_code != 200:
+                return []
+            return resp.json()
+
+    async def create_custom_import_list(
+        self,
+        name: str,
+        list_url: str,
+        quality_profile_id: int,
+        root_folder_path: str,
+        enable_auto: bool = False
+    ) -> Dict[str, Any]:
+        payload = {
+            "name": name,
+            "enabled": True,
+            "enableAuto": False,
+            "qualityProfileId": quality_profile_id,
+            "rootFolderPath": root_folder_path,
+            "searchOnAdd": False,
+            "implementation": "RadarrListImport",
+            "configContract": "RadarrListSettings",
+            "fields": [
+                {
+                    "name": "url",
+                    "value": list_url
+                }
+            ]
+        }
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{self.url}/api/v3/importlist",
+                json=payload,
+                headers=self.headers
+            )
+            if resp.status_code in (200, 201):
+                return resp.json()
+            raise Exception(f"Radarr failed to create import list (HTTP {resp.status_code}): {resp.text[:150]}")
+
+    async def delete_import_list(self, list_id: int) -> bool:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(
+                f"{self.url}/api/v3/importlist/{list_id}",
+                headers=self.headers
+            )
+            return resp.status_code in (200, 204)
+
+    async def delete_import_lists_matching_url(self, url_pattern: str) -> int:
+        lists = await self.get_import_lists()
+        deleted = 0
+        for l in lists:
+            fields = l.get("fields", [])
+            for f in fields:
+                if f.get("name") in ("url", "baseUrl") and url_pattern in str(f.get("value", "")):
+                    if await self.delete_import_list(l.get("id")):
+                        deleted += 1
+                    break
+        return deleted
+
 
 class SonarrClient:
     def __init__(self, url: str, api_key: str):
@@ -300,6 +361,67 @@ class SonarrClient:
                 raise Exception(f"Sonarr rejected addition: {err_text[:120]}")
             else:
                 raise Exception(f"Sonarr returned HTTP {resp.status_code}: {resp.text[:120]}")
+
+    async def get_import_lists(self) -> List[Dict[str, Any]]:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{self.url}/api/v3/importlist", headers=self.headers)
+            if resp.status_code != 200:
+                return []
+            return resp.json()
+
+    async def create_custom_import_list(
+        self,
+        name: str,
+        list_url: str,
+        quality_profile_id: int,
+        root_folder_path: str,
+        enable_auto: bool = False
+    ) -> Dict[str, Any]:
+        payload = {
+            "name": name,
+            "enabled": True,
+            "enableAuto": False,
+            "qualityProfileId": quality_profile_id,
+            "rootFolderPath": root_folder_path,
+            "searchOnAdd": False,
+            "implementation": "CustomImport",
+            "configContract": "CustomSettings",
+            "fields": [
+                {
+                    "name": "baseUrl",
+                    "value": list_url
+                }
+            ]
+        }
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{self.url}/api/v3/importlist",
+                json=payload,
+                headers=self.headers
+            )
+            if resp.status_code in (200, 201):
+                return resp.json()
+            raise Exception(f"Sonarr failed to create import list (HTTP {resp.status_code}): {resp.text[:150]}")
+
+    async def delete_import_list(self, list_id: int) -> bool:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(
+                f"{self.url}/api/v3/importlist/{list_id}",
+                headers=self.headers
+            )
+            return resp.status_code in (200, 204)
+
+    async def delete_import_lists_matching_url(self, url_pattern: str) -> int:
+        lists = await self.get_import_lists()
+        deleted = 0
+        for l in lists:
+            fields = l.get("fields", [])
+            for f in fields:
+                if f.get("name") in ("baseUrl", "url") and url_pattern in str(f.get("value", "")):
+                    if await self.delete_import_list(l.get("id")):
+                        deleted += 1
+                    break
+        return deleted
 
 
 def get_arr_config(db: Session) -> Dict[str, Any]:

@@ -58,6 +58,9 @@ export default function Dashboard() {
   const [arrUrlsMissingOnly, setArrUrlsMissingOnly] = useState(false);
   const [copiedRadarrUrl, setCopiedRadarrUrl] = useState(false);
   const [copiedSonarrUrl, setCopiedSonarrUrl] = useState(false);
+  const [arrImportStatus, setArrImportStatus] = useState(null);
+  const [loadingArrStatus, setLoadingArrStatus] = useState(false);
+  const [registeringArr, setRegisteringArr] = useState(null);
 
   const handleOpenItems = async (playlist, forceRefresh = false) => {
     setInspectingPlaylist(playlist);
@@ -454,6 +457,78 @@ export default function Dashboard() {
     } catch (err) {
       console.error('Failed to copy Arr URL:', err);
     }
+  };
+
+  const fetchArrImportStatus = async (playlistId) => {
+    setLoadingArrStatus(true);
+    try {
+      const resp = await fetch(`/api/playlists/${playlistId}/arr-import/status`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setArrImportStatus(data);
+      }
+    } catch (err) {
+      console.error('Failed to load Arr import status:', err);
+    } finally {
+      setLoadingArrStatus(false);
+    }
+  };
+
+  const handleRegisterArr = async (playlistId, target) => {
+    setRegisteringArr(target);
+    try {
+      const resp = await fetch(`/api/playlists/${playlistId}/arr-import/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          target: target,
+          playlistarr_url: window.location.origin,
+          missing_only: arrUrlsMissingOnly
+        })
+      });
+      if (resp.ok) {
+        await fetchArrImportStatus(playlistId);
+      }
+    } catch (err) {
+      console.error('Failed to register in Arr:', err);
+    } finally {
+      setRegisteringArr(null);
+    }
+  };
+
+  const handleUnregisterArr = async (playlistId, target) => {
+    setRegisteringArr(target);
+    try {
+      const resp = await fetch(`/api/playlists/${playlistId}/arr-import/unregister`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ target: target })
+      });
+      if (resp.ok) {
+        await fetchArrImportStatus(playlistId);
+      }
+    } catch (err) {
+      console.error('Failed to unregister from Arr:', err);
+    } finally {
+      setRegisteringArr(null);
+    }
+  };
+
+  const handleOpenArrUrls = (p) => {
+    setArrUrlsModalPlaylist(p);
+    setArrUrlsMissingOnly(false);
+    setCopiedRadarrUrl(false);
+    setCopiedSonarrUrl(false);
+    setArrImportStatus(null);
+    fetchArrImportStatus(p.id);
   };
 
   const handleEdit = (p) => {
@@ -960,12 +1035,7 @@ export default function Dashboard() {
                     className="btn btn-secondary" 
                     style={{ padding: '0.4rem', borderRadius: '6px' }} 
                     title="Sonarr & Radarr Custom List URLs" 
-                    onClick={() => {
-                      setArrUrlsModalPlaylist(p);
-                      setArrUrlsMissingOnly(false);
-                      setCopiedRadarrUrl(false);
-                      setCopiedSonarrUrl(false);
-                    }}
+                    onClick={() => handleOpenArrUrls(p)}
                   >
                     <Link2 size={16} />
                   </button>
@@ -1185,12 +1255,7 @@ export default function Dashboard() {
 
                 <button
                   className="btn btn-secondary"
-                  onClick={() => {
-                    setArrUrlsModalPlaylist(inspectingPlaylist);
-                    setArrUrlsMissingOnly(false);
-                    setCopiedRadarrUrl(false);
-                    setCopiedSonarrUrl(false);
-                  }}
+                  onClick={() => handleOpenArrUrls(inspectingPlaylist)}
                   style={{
                     padding: '0.4rem 0.75rem',
                     fontSize: '0.8rem',
@@ -1786,6 +1851,43 @@ export default function Dashboard() {
                     {copiedRadarrUrl ? 'Copied!' : 'Copy URL'}
                   </button>
                 </div>
+
+                {/* 1-Click Radarr Sync Action */}
+                <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    {arrImportStatus?.radarr?.lists && arrImportStatus.radarr.lists.length > 0 ? (
+                      <span style={{ fontSize: '0.75rem', color: '#4ade80', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 500 }}>
+                        <CheckCircle2 size={13} /> Active in Radarr ({arrImportStatus.radarr.lists[0].name})
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {arrImportStatus?.radarr?.configured ? 'Auto-Add and Auto-Search disabled for manual control' : 'Configure Radarr in Settings to enable 1-click add'}
+                      </span>
+                    )}
+                  </div>
+                  {arrImportStatus?.radarr?.configured && (
+                    arrImportStatus.radarr.lists && arrImportStatus.radarr.lists.length > 0 ? (
+                      <button
+                        className="btn btn-secondary"
+                        disabled={registeringArr === 'radarr'}
+                        onClick={() => handleUnregisterArr(arrUrlsModalPlaylist.id, 'radarr')}
+                        style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                      >
+                        {registeringArr === 'radarr' ? 'Removing...' : 'Remove from Radarr'}
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-secondary"
+                        disabled={registeringArr === 'radarr'}
+                        onClick={() => handleRegisterArr(arrUrlsModalPlaylist.id, 'radarr')}
+                        style={{ padding: '0.3rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px', borderColor: 'rgba(251, 191, 36, 0.4)', color: '#fbbf24' }}
+                      >
+                        <Plus size={13} />
+                        {registeringArr === 'radarr' ? 'Adding...' : 'Add to Radarr'}
+                      </button>
+                    )
+                  )}
+                </div>
               </div>
 
               {/* Sonarr Section */}
@@ -1839,6 +1941,43 @@ export default function Dashboard() {
                     {copiedSonarrUrl ? <Check size={15} /> : <Copy size={15} />}
                     {copiedSonarrUrl ? 'Copied!' : 'Copy URL'}
                   </button>
+                </div>
+
+                {/* 1-Click Sonarr Sync Action */}
+                <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    {arrImportStatus?.sonarr?.lists && arrImportStatus.sonarr.lists.length > 0 ? (
+                      <span style={{ fontSize: '0.75rem', color: '#4ade80', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 500 }}>
+                        <CheckCircle2 size={13} /> Active in Sonarr ({arrImportStatus.sonarr.lists[0].name})
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {arrImportStatus?.sonarr?.configured ? 'Auto-Add and Auto-Search disabled for manual control' : 'Configure Sonarr in Settings to enable 1-click add'}
+                      </span>
+                    )}
+                  </div>
+                  {arrImportStatus?.sonarr?.configured && (
+                    arrImportStatus.sonarr.lists && arrImportStatus.sonarr.lists.length > 0 ? (
+                      <button
+                        className="btn btn-secondary"
+                        disabled={registeringArr === 'sonarr'}
+                        onClick={() => handleUnregisterArr(arrUrlsModalPlaylist.id, 'sonarr')}
+                        style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                      >
+                        {registeringArr === 'sonarr' ? 'Removing...' : 'Remove from Sonarr'}
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-secondary"
+                        disabled={registeringArr === 'sonarr'}
+                        onClick={() => handleRegisterArr(arrUrlsModalPlaylist.id, 'sonarr')}
+                        style={{ padding: '0.3rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px', borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+                      >
+                        <Plus size={13} />
+                        {registeringArr === 'sonarr' ? 'Adding...' : 'Add to Sonarr'}
+                      </button>
+                    )
+                  )}
                 </div>
               </div>
             </div>

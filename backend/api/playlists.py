@@ -277,6 +277,19 @@ async def delete_playlist(
         except Exception as se:
             print(f"Error deleting playlist '{config.name}' from server {server.name}: {se}")
 
+    # Automatically clean up any matching import lists from Radarr & Sonarr
+    try:
+        arr_cfg = get_arr_config(db)
+        url_pattern = f"/api/playlists/{playlist_id}/arr-import"
+        if arr_cfg.get("radarr", {}).get("configured"):
+            rc = RadarrClient(arr_cfg["radarr"]["url"], arr_cfg["radarr"]["api_key"])
+            await rc.delete_import_lists_matching_url(url_pattern)
+        if arr_cfg.get("sonarr", {}).get("configured"):
+            sc = SonarrClient(arr_cfg["sonarr"]["url"], arr_cfg["sonarr"]["api_key"])
+            await sc.delete_import_lists_matching_url(url_pattern)
+    except Exception as ae:
+        print(f"Error removing import lists from Radarr/Sonarr for playlist {playlist_id}: {ae}")
+
     # Delete associated sync logs to maintain foreign key integrity
     db.query(SyncLog).filter(SyncLog.list_config_id == playlist_id).delete()
     db.delete(config)
@@ -336,21 +349,172 @@ async def export_playlist(
         headers={"Content-Disposition": f'attachment; filename="{config.name}.json"'}
     )
 
-@router.get("/{playlist_id}/arr-import/{arr_type}")
-@router.get("/{playlist_id}/arr-import")
-async def get_arr_custom_list(
+class RegisterArrListRequest(BaseModel):
+    target: str = "both"  # "sonarr" | "radarr" | "both"
+    playlistarr_url: str  # e.g. "http://192.168.8.56:8671"
+    missing_only: bool = False
+
+@router.get("/{playlist_id}/arr-import/status")
+async def get_arr_import_status(
     playlist_id: int,
-    arr_type: Optional[str] = None,
-    type: Optional[str] = None,
-    missing_only: bool = False,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """
-    Public Custom List endpoint compatible with Sonarr (CustomImport) and Radarr (RadarrListImport).
-    - Sonarr: Returns JSON array of series objects [{"tvdbId": 12345, "title": "Series Name"}]
-    - Radarr: Returns JSON array of movie objects [{"id": 12345, "title": "Movie Name", "release_date": "YYYY-MM-DD"}]
-    """
-    target_type = (arr_type or type or "radarr").lower().strip()
+    """Checks if this playlist is currently added as an import list in Sonarr or Radarr."""
+    config = db.query(ListConfig).filter(ListConfig.id == playlist_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    if not current_user.is_admin and (config.is_global or config.user_id != current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    arr_cfg = get_arr_config(db)
+    url_pattern = f"/api/playlists/{playlist_id}/arr-import"
+
+    radarr_status = {"configured": arr_cfg["radarr"]["configured"], "connected": False, "lists": []}
+    sonarr_status = {"configured": arr_cfg["sonarr"]["configured"], "connected": False, "lists": []}
+
+    if arr_cfg["radarr"]["configured"]:
+        try:
+            rc = RadarrClient(arr_cfg["radarr"]["url"], arr_cfg["radarr"]["api_key"])
+            lists = await rc.get_import_lists()
+            radarr_status["connected"] = True
+            for l in lists:
+                for f in l.get("fields", []):
+                    if f.get("name") in ("url", "baseUrl") and url_pattern in str(f.get("value", "")):
+                        radarr_status["lists"].append({"id": l.get("id"), "name": l.get("name"), "url": f.get("value")})
+        except Exception as e:
+            radarr_status["error"] = str(e)
+
+    if arr_cfg["sonarr"]["configured"]:
+        try:
+            sc = SonarrClient(arr_cfg["sonarr"]["url"], arr_cfg["sonarr"]["api_key"])
+            lists = await sc.get_import_lists()
+            sonarr_status["connected"] = True
+            for l in lists:
+                for f in l.get("fields", []):
+                    if f.get("name") in ("baseUrl", "url") and url_pattern in str(f.get("value", "")):
+                        sonarr_status["lists"].append({"id": l.get("id"), "name": l.get("name"), "url": f.get("value")})
+        except Exception as e:
+            sonarr_status["error"] = str(e)
+
+    return {
+        "radarr": radarr_status,
+        "sonarr": sonarr_status
+    }
+
+@router.post("/{playlist_id}/arr-import/register")
+async def register_arr_import_list(
+    playlist_id: int,
+    req: RegisterArrListRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Registers this playlist as a native Custom List in Sonarr and/or Radarr."""
+    config = db.query(ListConfig).filter(ListConfig.id == playlist_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    if not current_user.is_admin and (config.is_global or config.user_id != current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    arr_cfg = get_arr_config(db)
+    base_url = (req.playlistarr_url or "").rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Playlistarr Base URL is required")
+
+    results = {}
+    targets = [req.target.lower()] if req.target.lower() in ("radarr", "sonarr") else ["radarr", "sonarr"]
+
+    if "radarr" in targets:
+        if not arr_cfg["radarr"]["configured"]:
+            results["radarr"] = {"status": "error", "message": "Radarr is not configured in Settings"}
+        elif not arr_cfg["radarr"]["quality_profile_id"] or not arr_cfg["radarr"]["root_folder_path"]:
+            results["radarr"] = {"status": "error", "message": "Radarr Quality Profile or Root Folder not set in Settings"}
+        else:
+            try:
+                rc = RadarrClient(arr_cfg["radarr"]["url"], arr_cfg["radarr"]["api_key"])
+                # Remove any existing import list for this playlist first to avoid duplicates
+                await rc.delete_import_lists_matching_url(f"/api/playlists/{playlist_id}/arr-import")
+                list_url = f"{base_url}/api/playlists/{playlist_id}/arr-import/radarr"
+                if req.missing_only:
+                    list_url += "?missing_only=true"
+                list_name = f"Playlistarr - {config.name}"
+                created = await rc.create_custom_import_list(
+                    name=list_name,
+                    list_url=list_url,
+                    quality_profile_id=arr_cfg["radarr"]["quality_profile_id"],
+                    root_folder_path=arr_cfg["radarr"]["root_folder_path"],
+                    enable_auto=False
+                )
+                results["radarr"] = {"status": "success", "id": created.get("id"), "message": f"Added to Radarr as '{list_name}'"}
+            except Exception as e:
+                results["radarr"] = {"status": "error", "message": str(e)}
+
+    if "sonarr" in targets:
+        if not arr_cfg["sonarr"]["configured"]:
+            results["sonarr"] = {"status": "error", "message": "Sonarr is not configured in Settings"}
+        elif not arr_cfg["sonarr"]["quality_profile_id"] or not arr_cfg["sonarr"]["root_folder_path"]:
+            results["sonarr"] = {"status": "error", "message": "Sonarr Quality Profile or Root Folder not set in Settings"}
+        else:
+            try:
+                sc = SonarrClient(arr_cfg["sonarr"]["url"], arr_cfg["sonarr"]["api_key"])
+                # Remove any existing import list for this playlist first to avoid duplicates
+                await sc.delete_import_lists_matching_url(f"/api/playlists/{playlist_id}/arr-import")
+                list_url = f"{base_url}/api/playlists/{playlist_id}/arr-import/sonarr"
+                if req.missing_only:
+                    list_url += "?missing_only=true"
+                list_name = f"Playlistarr - {config.name}"
+                created = await sc.create_custom_import_list(
+                    name=list_name,
+                    list_url=list_url,
+                    quality_profile_id=arr_cfg["sonarr"]["quality_profile_id"],
+                    root_folder_path=arr_cfg["sonarr"]["root_folder_path"],
+                    enable_auto=False
+                )
+                results["sonarr"] = {"status": "success", "id": created.get("id"), "message": f"Added to Sonarr as '{list_name}'"}
+            except Exception as e:
+                results["sonarr"] = {"status": "error", "message": str(e)}
+
+    return results
+
+@router.post("/{playlist_id}/arr-import/unregister")
+async def unregister_arr_import_list(
+    playlist_id: int,
+    req: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Removes this playlist from Sonarr and/or Radarr import lists."""
+    config = db.query(ListConfig).filter(ListConfig.id == playlist_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    if not current_user.is_admin and (config.is_global or config.user_id != current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    target = req.get("target", "both").lower()
+    arr_cfg = get_arr_config(db)
+    url_pattern = f"/api/playlists/{playlist_id}/arr-import"
+    deleted_counts = {}
+
+    if target in ("radarr", "both") and arr_cfg["radarr"]["configured"]:
+        try:
+            rc = RadarrClient(arr_cfg["radarr"]["url"], arr_cfg["radarr"]["api_key"])
+            deleted_counts["radarr"] = await rc.delete_import_lists_matching_url(url_pattern)
+        except Exception as e:
+            deleted_counts["radarr_error"] = str(e)
+
+    if target in ("sonarr", "both") and arr_cfg["sonarr"]["configured"]:
+        try:
+            sc = SonarrClient(arr_cfg["sonarr"]["url"], arr_cfg["sonarr"]["api_key"])
+            deleted_counts["sonarr"] = await sc.delete_import_lists_matching_url(url_pattern)
+        except Exception as e:
+            deleted_counts["sonarr_error"] = str(e)
+
+    return {"deleted": deleted_counts}
+
+async def _build_arr_custom_list(playlist_id: int, target_type: str, missing_only: bool, db: Session):
     config = db.query(ListConfig).filter(ListConfig.id == playlist_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Playlist not found")
@@ -429,6 +593,35 @@ async def get_arr_custom_list(
             results.append(entry)
 
     return JSONResponse(content=results)
+
+@router.get("/{playlist_id}/arr-import/radarr")
+async def get_radarr_custom_list(
+    playlist_id: int,
+    missing_only: bool = False,
+    db: Session = Depends(get_db)
+):
+    """Radarr Custom Lists endpoint: returns JSON array of movie objects."""
+    return await _build_arr_custom_list(playlist_id, "radarr", missing_only, db)
+
+@router.get("/{playlist_id}/arr-import/sonarr")
+async def get_sonarr_custom_list(
+    playlist_id: int,
+    missing_only: bool = False,
+    db: Session = Depends(get_db)
+):
+    """Sonarr Custom List endpoint: returns JSON array of series objects."""
+    return await _build_arr_custom_list(playlist_id, "sonarr", missing_only, db)
+
+@router.get("/{playlist_id}/arr-import")
+async def get_generic_arr_custom_list(
+    playlist_id: int,
+    type: Optional[str] = "radarr",
+    missing_only: bool = False,
+    db: Session = Depends(get_db)
+):
+    """Generic Arr import endpoint with ?type=radarr|sonarr."""
+    target = (type or "radarr").lower().strip()
+    return await _build_arr_custom_list(playlist_id, target, missing_only, db)
 
 
 # --- Radarr & Sonarr Automation Endpoints ---
