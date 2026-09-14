@@ -140,7 +140,9 @@ export default function Dashboard() {
         if (it.tmdb_id) ids.push(`TMDb: ${it.tmdb_id}`);
         if (it.tvdb_id) ids.push(`TVDb: ${it.tvdb_id}`);
         const idStr = ids.length ? ` [${ids.join(', ')}]` : '';
-        const ep = it.show_title ? ` (${it.show_title})` : '';
+        const ep = it.show_title 
+          ? ` (${it.show_title}${it.season_number != null ? ` - ${it.episode_number != null ? `S${it.season_number}E${it.episode_number}` : `Season ${it.season_number}`}` : ''})` 
+          : '';
         return `• #${it.order} ${it.title}${ep} (${it.year || 'N/A'})${idStr}`;
       })
     ];
@@ -1451,9 +1453,11 @@ export default function Dashboard() {
                           {item.show_title && (
                             <div style={{ fontSize: '0.8rem', color: '#c084fc', marginTop: '2px' }}>
                               {item.show_title}
-                              {item.season_number != null && item.episode_number != null && (
+                              {item.season_number != null && (
                                 <span style={{ marginLeft: '0.35rem', color: 'var(--text-muted)' }}>
-                                  S{String(item.season_number).padStart(2, '0')}E{String(item.episode_number).padStart(2, '0')}
+                                  {item.episode_number != null 
+                                    ? `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
+                                    : `Season ${item.season_number}`}
                                 </span>
                               )}
                             </div>

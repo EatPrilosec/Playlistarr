@@ -58,21 +58,43 @@ class TraktProvider(BaseProvider):
                     media = it.get(itype) or {}
                     show = it.get("show") or {}
                     
-                    title = media.get("title") or show.get("title")
-                    year = media.get("year") or show.get("year")
+                    show_title = show.get("title")
+                    show_year = show.get("year")
                     
                     media_ids = media.get("ids") or {}
                     show_ids = show.get("ids") or {}
                     
-                    imdb_id = media_ids.get("imdb") or show_ids.get("imdb")
+                    season_num = None
+                    episode_num = None
+                    
+                    if itype == "season":
+                        season_num = media.get("number")
+                        media_title = media.get("title")
+                        title = media_title or (f"{show_title} Season {season_num}" if show_title and season_num is not None else show_title or "Unknown Season")
+                        year = show_year or media.get("year")
+                    elif itype == "episode":
+                        season_num = media.get("season")
+                        episode_num = media.get("number")
+                        title = media.get("title") or (f"Episode {episode_num}" if episode_num is not None else "Unknown Episode")
+                        year = media.get("year") or show_year
+                    else:
+                        title = media.get("title") or show_title
+                        year = media.get("year") or show_year
+                    
+                    # For TV items, prioritize show_ids for TVDB (Sonarr requirement) and IMDb
+                    imdb_id = show_ids.get("imdb") or media_ids.get("imdb")
                     tmdb_id = media_ids.get("tmdb") or show_ids.get("tmdb")
-                    tvdb_id = media_ids.get("tvdb") or show_ids.get("tvdb")
+                    tvdb_id = show_ids.get("tvdb") or media_ids.get("tvdb")
                     
                     items.append({
                         "title": title,
-                        "show_title": show.get("title"),
+                        "show_title": show_title,
                         "year": year,
                         "type": itype,
+                        "season": season_num,
+                        "episode": episode_num,
+                        "season_number": season_num,
+                        "episode_number": episode_num,
                         "imdb_id": str(imdb_id) if imdb_id else None,
                         "tmdb_id": str(tmdb_id) if tmdb_id else None,
                         "tvdb_id": str(tvdb_id) if tvdb_id else None,

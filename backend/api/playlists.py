@@ -539,7 +539,7 @@ async def _build_arr_custom_list(playlist_id: int, target_type: str, missing_onl
         seen_tvdb = set()
         for item in items:
             m_type = (item.get("type") or "").lower()
-            is_tv = m_type in ("show", "episode", "series") or bool(item.get("show_title")) or bool(item.get("tvdb_id"))
+            is_tv = m_type in ("show", "episode", "series", "season") or bool(item.get("show_title")) or bool(item.get("tvdb_id"))
             if not is_tv:
                 continue
 

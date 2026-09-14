@@ -60,6 +60,81 @@ class MediaServerClient:
             "X-Emby-Token": self.api_key
         }
         
+    async def find_series_id(
+        self,
+        show_title: str = None,
+        year: int = None,
+        imdb_id: str = None,
+        tmdb_id: str = None,
+        tvdb_id: str = None,
+        client: httpx.AsyncClient = None
+    ) -> str | None:
+        """Find the Media Server Series Id using provider IDs or title"""
+        close_client = False
+        if client is None:
+            client = httpx.AsyncClient(headers=self.headers, timeout=10.0)
+            close_client = True
+
+        try:
+            # 1. For Emby: AnyProviderIdEquals on Series
+            if self.server_type == "emby":
+                for pid_key, pid_val in [('imdb', imdb_id), ('tvdb', tvdb_id), ('tmdb', tmdb_id)]:
+                    if pid_val:
+                        try:
+                            resp = await client.get(f"{self.server_url}/Items", params={
+                                "Recursive": "true",
+                                "AnyProviderIdEquals": f"{pid_key}.{pid_val}",
+                                "IncludeItemTypes": "Series",
+                                "fields": "ProviderIds,Name,ProductionYear"
+                            }, headers=self.headers)
+                            if resp.status_code == 200:
+                                items = resp.json().get("Items", [])
+                                if items:
+                                    return items[0].get("Id")
+                        except Exception:
+                            pass
+
+            # 2. Search by show_title or candidate queries
+            if show_title:
+                search_queries = _generate_search_queries(show_title, "show")
+                clean_st = _clean_str(show_title)
+                for sq in search_queries:
+                    try:
+                        resp = await client.get(f"{self.server_url}/Items", params={
+                            "SearchTerm": sq,
+                            "Recursive": "true",
+                            "IncludeItemTypes": "Series",
+                            "fields": "ProviderIds,Name,ProductionYear"
+                        }, headers=self.headers)
+                        if resp.status_code == 200:
+                            items = resp.json().get("Items", [])
+                            # Match by candidate ProviderIds
+                            for it in items:
+                                pids = it.get("ProviderIds", {}) or {}
+                                if imdb_id and pids.get("Imdb") == imdb_id:
+                                    return it.get("Id")
+                                if tvdb_id and str(pids.get("Tvdb")) == str(tvdb_id):
+                                    return it.get("Id")
+                                if tmdb_id and str(pids.get("Tmdb")) == str(tmdb_id):
+                                    return it.get("Id")
+
+                            for it in items:
+                                it_year = it.get("ProductionYear")
+                                if year and it_year and abs(it_year - year) > 2:
+                                    continue
+                                it_name = _clean_str(it.get("Name", ""))
+                                if it_name == clean_st:
+                                    return it.get("Id")
+                                if len(clean_st) >= 4 and (clean_st in it_name or it_name in clean_st):
+                                    return it.get("Id")
+                    except Exception:
+                        pass
+        finally:
+            if close_client:
+                await client.aclose()
+
+        return None
+
     async def search_item(
         self,
         title: str,
@@ -69,6 +144,8 @@ class MediaServerClient:
         tmdb_id: str = None,
         tvdb_id: str = None,
         show_title: str = None,
+        season_number: int = None,
+        episode_number: int = None,
         client: httpx.AsyncClient = None
     ) -> str | None:
         """Search for an item by provider IDs or title and return its media server ID"""
@@ -78,15 +155,134 @@ class MediaServerClient:
             close_client = True
             
         try:
+            itype = (item_type or "").lower()
+
+            # --- A. SPECIALIZED SEASON RESOLUTION ---
+            if itype == "season":
+                target_show = show_title or title
+                series_id = await self.find_series_id(
+                    show_title=target_show,
+                    year=year,
+                    imdb_id=imdb_id,
+                    tmdb_id=tmdb_id,
+                    tvdb_id=tvdb_id,
+                    client=client
+                )
+                if series_id:
+                    try:
+                        resp = await client.get(f"{self.server_url}/Shows/{series_id}/Seasons", headers=self.headers)
+                        if resp.status_code == 200:
+                            seasons = resp.json().get("Items", [])
+                            # 1. Match by season_number (IndexNumber)
+                            if season_number is not None:
+                                for s in seasons:
+                                    if s.get("IndexNumber") == season_number:
+                                        return s.get("Id")
+                                # Fallback by Season Name
+                                for s in seasons:
+                                    s_name = (s.get("Name") or "").strip().lower()
+                                    if s_name in [f"season {season_number}", f"season 0{season_number}", f"series {season_number}"]:
+                                        return s.get("Id")
+                            # 2. Match by clean season title
+                            clean_t = _clean_str(title)
+                            for s in seasons:
+                                if _clean_str(s.get("Name", "")) == clean_t:
+                                    return s.get("Id")
+                    except Exception:
+                        pass
+                # Strict: Never return parent Series ID when a Season was requested
+                return None
+
+            # --- B. SPECIALIZED EPISODE RESOLUTION ---
+            if itype == "episode":
+                target_show = show_title
+                series_id = None
+                if target_show:
+                    series_id = await self.find_series_id(
+                        show_title=target_show,
+                        year=year,
+                        imdb_id=imdb_id,
+                        tmdb_id=tmdb_id,
+                        tvdb_id=tvdb_id,
+                        client=client
+                    )
+                if series_id:
+                    try:
+                        ep_params = {"fields": "ProviderIds,Name,Path,IndexNumber,ParentIndexNumber"}
+                        if season_number is not None:
+                            ep_params["season"] = season_number
+                        resp = await client.get(f"{self.server_url}/Shows/{series_id}/Episodes", params=ep_params, headers=self.headers)
+                        if resp.status_code == 200:
+                            eps = resp.json().get("Items", [])
+                            # Match by season & episode number
+                            if episode_number is not None:
+                                for ep in eps:
+                                    ep_num = ep.get("IndexNumber")
+                                    s_num = ep.get("ParentIndexNumber")
+                                    if ep_num == episode_number:
+                                        if season_number is None or s_num is None or s_num == season_number:
+                                            return ep.get("Id")
+                            # Match by episode ProviderIds
+                            for ep in eps:
+                                pids = ep.get("ProviderIds", {}) or {}
+                                if tvdb_id and str(pids.get("Tvdb")) == str(tvdb_id):
+                                    return ep.get("Id")
+                                if imdb_id and pids.get("Imdb") == imdb_id:
+                                    return ep.get("Id")
+                                if tmdb_id and str(pids.get("Tmdb")) == str(tmdb_id):
+                                    return ep.get("Id")
+                            # Match by episode title
+                            clean_t = _clean_str(title)
+                            for ep in eps:
+                                if _clean_str(ep.get("Name", "")) == clean_t:
+                                    return ep.get("Id")
+                    except Exception:
+                        pass
+
+                # Episode fallback: search /Items specifically for IncludeItemTypes="Episode"
+                search_queries = _generate_search_queries(title, "episode")
+                clean_t = _clean_str(title)
+                for sq in search_queries:
+                    try:
+                        resp = await client.get(f"{self.server_url}/Items", params={
+                            "SearchTerm": sq,
+                            "Recursive": "true",
+                            "IncludeItemTypes": "Episode",
+                            "fields": "ProviderIds,SeriesName,Path,ProductionYear,Name,IndexNumber,ParentIndexNumber"
+                        }, headers=self.headers)
+                        if resp.status_code == 200:
+                            items = resp.json().get("Items", [])
+                            for it in items:
+                                if show_title:
+                                    s_name = it.get("SeriesName", "")
+                                    if s_name and _clean_str(s_name) != _clean_str(show_title):
+                                        continue
+                                if episode_number is not None and it.get("IndexNumber") == episode_number:
+                                    if season_number is None or it.get("ParentIndexNumber") == season_number:
+                                        return it.get("Id")
+                                if _clean_str(it.get("Name", "")) == clean_t:
+                                    return it.get("Id")
+                    except Exception:
+                        pass
+                # Strict: Never return Series or Season ID when an Episode was requested
+                return None
+
+            # --- C. MOVIES, SERIES, & GENERAL ITEMS ---
             # 1. For Emby, AnyProviderIdEquals is fast and native
             if self.server_type == "emby":
+                inc_types = "Movie,Series,Video"
+                if itype == "movie":
+                    inc_types = "Movie,Video"
+                elif itype in ["show", "series"]:
+                    inc_types = "Series"
+
                 for pid_key, pid_val in [('imdb', imdb_id), ('tmdb', tmdb_id), ('tvdb', tvdb_id)]:
                     if pid_val:
                         url = f"{self.server_url}/Items"
                         params = {
                             "Recursive": "true",
                             "AnyProviderIdEquals": f"{pid_key}.{pid_val}",
-                            "IncludeItemTypes": "Movie,Series,Season,Episode,Video",
+                            "IncludeItemTypes": inc_types,
                             "fields": "ProviderIds,SeriesName,Path,ProductionYear,Name"
                         }
                         try:
@@ -99,17 +295,11 @@ class MediaServerClient:
                             pass
 
             # 2. Search by SearchTerm with candidate provider IDs and title/path filtering
-            include_types = "Movie,Series,Season,Episode"
-            if item_type:
-                itype = item_type.lower()
-                if itype == "movie":
-                    include_types = "Movie"
-                elif itype in ["show", "series"]:
-                    include_types = "Series"
-                elif itype == "season":
-                    include_types = "Season,Series"
-                elif itype == "episode":
-                    include_types = "Episode"
+            include_types = "Movie,Series,Video"
+            if itype == "movie":
+                include_types = "Movie,Video"
+            elif itype in ["show", "series"]:
+                include_types = "Series"
 
             search_queries = _generate_search_queries(title, item_type)
             clean_t = _clean_str(title)
@@ -137,13 +327,8 @@ class MediaServerClient:
                             if tvdb_id and str(pids.get("Tvdb")) == str(tvdb_id):
                                 return it.get("Id")
 
-                        # 2b. Match by candidate Name / Path / SeriesName WITH STRICT YEAR CHECK
+                        # 2b. Match by candidate Name / Path WITH STRICT YEAR CHECK
                         for it in items:
-                            if item_type and item_type.lower() == "episode" and show_title:
-                                s_name = it.get("SeriesName", "")
-                                if s_name and _clean_str(s_name) != _clean_str(show_title):
-                                    continue
-
                             it_year = it.get("ProductionYear")
                             if year and it_year and abs(it_year - year) > 1:
                                 continue
@@ -160,35 +345,6 @@ class MediaServerClient:
                             if len(clean_t) >= 4 and ((clean_t in it_path) or (clean_t in it_name)):
                                 if year and it_year and abs(it_year - year) <= 1:
                                     return it.get("Id")
-                except Exception:
-                    pass
-
-            # 3. For TV episodes still unmatched, query the show's episodes directly
-            if item_type and item_type.lower() == "episode" and show_title:
-                try:
-                    s_resp = await client.get(f"{self.server_url}/Items", params={
-                        "SearchTerm": show_title,
-                        "Recursive": "true",
-                        "IncludeItemTypes": "Series",
-                        "fields": "ProviderIds"
-                    }, headers=self.headers)
-                    if s_resp.status_code == 200:
-                        series_items = s_resp.json().get("Items", [])
-                        if series_items:
-                            series_id = series_items[0].get("Id")
-                            ep_resp = await client.get(f"{self.server_url}/Shows/{series_id}/Episodes", params={
-                                "fields": "ProviderIds,Name,Path"
-                            }, headers=self.headers)
-                            if ep_resp.status_code == 200:
-                                eps = ep_resp.json().get("Items", [])
-                                for ep in eps:
-                                    pids = ep.get("ProviderIds", {}) or {}
-                                    if tvdb_id and str(pids.get("Tvdb")) == str(tvdb_id):
-                                        return ep.get("Id")
-                                    if imdb_id and pids.get("Imdb") == imdb_id:
-                                        return ep.get("Id")
-                                    if tmdb_id and str(pids.get("Tmdb")) == str(tmdb_id):
-                                        return ep.get("Id")
                 except Exception:
                     pass
 

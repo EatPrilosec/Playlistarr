@@ -49,6 +49,8 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                                     tmdb_id=it.get("tmdb_id"),
                                     tvdb_id=it.get("tvdb_id"),
                                     show_title=it.get("show_title"),
+                                    season_number=it.get("season_number") if it.get("season_number") is not None else it.get("season"),
+                                    episode_number=it.get("episode_number") if it.get("episode_number") is not None else it.get("episode"),
                                     client=http_client
                                 )
                             except Exception as item_err:
@@ -133,6 +135,10 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                 "year": it.get("year"),
                 "type": it.get("type", "movie"),
                 "show_title": it.get("show_title"),
+                "season": it.get("season_number") if it.get("season_number") is not None else it.get("season"),
+                "episode": it.get("episode_number") if it.get("episode_number") is not None else it.get("episode"),
+                "season_number": it.get("season_number") if it.get("season_number") is not None else it.get("season"),
+                "episode_number": it.get("episode_number") if it.get("episode_number") is not None else it.get("episode"),
                 "imdb_id": it.get("imdb_id"),
                 "tmdb_id": it.get("tmdb_id"),
                 "tvdb_id": it.get("tvdb_id"),
@@ -215,6 +221,8 @@ async def get_playlist_items_with_matches(db: Session, list_config: ListConfig, 
                             tmdb_id=it.get("tmdb_id"),
                             tvdb_id=it.get("tvdb_id"),
                             show_title=it.get("show_title"),
+                            season_number=it.get("season_number") if it.get("season_number") is not None else it.get("season"),
+                            episode_number=it.get("episode_number") if it.get("episode_number") is not None else it.get("episode"),
                             client=http_client
                         )
                     except Exception as item_err:
@@ -247,6 +255,10 @@ async def get_playlist_items_with_matches(db: Session, list_config: ListConfig, 
             "year": it.get("year"),
             "type": it.get("type", "movie"),
             "show_title": it.get("show_title"),
+            "season": it.get("season_number") if it.get("season_number") is not None else it.get("season"),
+            "episode": it.get("episode_number") if it.get("episode_number") is not None else it.get("episode"),
+            "season_number": it.get("season_number") if it.get("season_number") is not None else it.get("season"),
+            "episode_number": it.get("episode_number") if it.get("episode_number") is not None else it.get("episode"),
             "imdb_id": it.get("imdb_id"),
             "tmdb_id": it.get("tmdb_id"),
             "tvdb_id": it.get("tvdb_id"),
