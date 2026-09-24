@@ -314,7 +314,8 @@ class SonarrClient:
         series: Dict[str, Any],
         quality_profile_id: int,
         root_folder_path: str,
-        search_on_add: bool = True
+        search_on_add: bool = True,
+        season_folder: bool = True
     ) -> Dict[str, Any]:
         # Check if already in library
         if series.get("id") and series.get("id") > 0:
@@ -330,7 +331,7 @@ class SonarrClient:
             "qualityProfileId": quality_profile_id,
             "rootFolderPath": root_folder_path,
             "monitored": True,
-            "seasonFolder": True,
+            "seasonFolder": season_folder,
             "addOptions": {
                 "searchForMissingEpisodes": search_on_add
             }
@@ -375,7 +376,8 @@ class SonarrClient:
         list_url: str,
         quality_profile_id: int,
         root_folder_path: str,
-        enable_auto: bool = False
+        enable_auto: bool = False,
+        season_folder: bool = True
     ) -> Dict[str, Any]:
         payload = {
             "name": name,
@@ -384,6 +386,7 @@ class SonarrClient:
             "qualityProfileId": quality_profile_id,
             "rootFolderPath": root_folder_path,
             "searchOnAdd": False,
+            "seasonFolder": season_folder,
             "implementation": "CustomImport",
             "configContract": "CustomSettings",
             "fields": [
@@ -430,7 +433,7 @@ def get_arr_config(db: Session) -> Dict[str, Any]:
         "radarr_url", "radarr_api_key", "radarr_quality_profile_id",
         "radarr_root_folder_path", "radarr_search_on_add",
         "sonarr_url", "sonarr_api_key", "sonarr_quality_profile_id",
-        "sonarr_root_folder_path", "sonarr_search_on_add"
+        "sonarr_root_folder_path", "sonarr_search_on_add", "sonarr_season_folder"
     ]
     settings_dict = {}
     records = db.query(AppSetting).filter(AppSetting.key.in_(keys)).all()
@@ -460,6 +463,7 @@ def get_arr_config(db: Session) -> Dict[str, Any]:
             "api_key": sonarr_api or "",
             "quality_profile_id": int(sonarr_profile_id) if sonarr_profile_id and sonarr_profile_id.isdigit() else None,
             "root_folder_path": settings_dict.get("sonarr_root_folder_path") or "",
-            "search_on_add": settings_dict.get("sonarr_search_on_add", "true").lower() == "true"
+            "search_on_add": settings_dict.get("sonarr_search_on_add", "true").lower() == "true",
+            "season_folder": settings_dict.get("sonarr_season_folder", "true").lower() == "true"
         }
     }

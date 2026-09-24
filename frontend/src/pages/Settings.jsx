@@ -49,12 +49,13 @@ export default function Settings() {
   const [radarrSaving, setRadarrSaving] = useState(false);
 
   // Sonarr State
-  const [sonarrConfig, setSonarrConfig] = useState({ configured: false, url: '', api_key: '', quality_profile_id: null, root_folder_path: '', search_on_add: true });
+  const [sonarrConfig, setSonarrConfig] = useState({ configured: false, url: '', api_key: '', quality_profile_id: null, root_folder_path: '', search_on_add: true, season_folder: true });
   const [sonarrUrl, setSonarrUrl] = useState('');
   const [sonarrApiKey, setSonarrApiKey] = useState('');
   const [sonarrProfileId, setSonarrProfileId] = useState('');
   const [sonarrFolderPath, setSonarrFolderPath] = useState('');
   const [sonarrSearchOnAdd, setSonarrSearchOnAdd] = useState(true);
+  const [sonarrSeasonFolder, setSonarrSeasonFolder] = useState(true);
   const [sonarrProfiles, setSonarrProfiles] = useState([]);
   const [sonarrFolders, setSonarrFolders] = useState([]);
   const [sonarrTesting, setSonarrTesting] = useState(false);
@@ -146,6 +147,7 @@ export default function Settings() {
           setSonarrProfileId(data.sonarr.quality_profile_id || '');
           setSonarrFolderPath(data.sonarr.root_folder_path || '');
           setSonarrSearchOnAdd(data.sonarr.search_on_add !== false);
+          setSonarrSeasonFolder(data.sonarr.season_folder !== false);
           if (data.sonarr.configured) {
             handleTestArr('sonarr', data.sonarr.url, data.sonarr.api_key, false);
           }
@@ -240,7 +242,8 @@ export default function Settings() {
         api_key: sonarrApiKey,
         quality_profile_id: sonarrProfileId ? parseInt(sonarrProfileId) : null,
         root_folder_path: sonarrFolderPath,
-        search_on_add: sonarrSearchOnAdd
+        search_on_add: sonarrSearchOnAdd,
+        season_folder: sonarrSeasonFolder
       };
 
       const resp = await fetch('/api/settings/arr', {
@@ -294,11 +297,13 @@ export default function Settings() {
           setRadarrProfiles([]);
           setRadarrFolders([]);
         } else {
-          setSonarrConfig({ configured: false, url: '', api_key: '', quality_profile_id: null, root_folder_path: '', search_on_add: true });
+          setSonarrConfig({ configured: false, url: '', api_key: '', quality_profile_id: null, root_folder_path: '', search_on_add: true, season_folder: true });
           setSonarrUrl('');
           setSonarrApiKey('');
           setSonarrProfileId('');
           setSonarrFolderPath('');
+          setSonarrSearchOnAdd(true);
+          setSonarrSeasonFolder(true);
           setSonarrTestResult(null);
           setSonarrProfiles([]);
           setSonarrFolders([]);
@@ -1273,6 +1278,19 @@ export default function Settings() {
               />
               <label htmlFor="sonarrSearch" style={{ fontSize: '0.85rem', margin: 0, cursor: 'pointer', fontWeight: 'normal' }}>
                 Start search for missing episodes upon adding
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+              <input
+                type="checkbox"
+                id="sonarrSeasonFolder"
+                checked={sonarrSeasonFolder}
+                onChange={e => setSonarrSeasonFolder(e.target.checked)}
+                style={{ width: 'auto', margin: 0 }}
+              />
+              <label htmlFor="sonarrSeasonFolder" style={{ fontSize: '0.85rem', margin: 0, cursor: 'pointer', fontWeight: 'normal' }}>
+                Use season folders for TV series
               </label>
             </div>
 

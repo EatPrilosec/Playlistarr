@@ -470,7 +470,8 @@ async def register_arr_import_list(
                     list_url=list_url,
                     quality_profile_id=arr_cfg["sonarr"]["quality_profile_id"],
                     root_folder_path=arr_cfg["sonarr"]["root_folder_path"],
-                    enable_auto=False
+                    enable_auto=False,
+                    season_folder=arr_cfg["sonarr"].get("season_folder", True)
                 )
                 results["sonarr"] = {"status": "success", "id": created.get("id"), "message": f"Added to Sonarr as '{list_name}'"}
             except Exception as e:
@@ -745,6 +746,7 @@ async def _process_add_item(item: Dict[str, Any], arr_cfg: Dict[str, Any], targe
                     }
 
             search_on_add = arr_cfg["sonarr"].get("search_on_add", True)
+            season_folder = arr_cfg["sonarr"].get("season_folder", True)
             series_title = item.get("show_title") or item.get("title")
             candidates = await sc.lookup_series(
                 title=series_title,
@@ -759,7 +761,7 @@ async def _process_add_item(item: Dict[str, Any], arr_cfg: Dict[str, Any], targe
                     "message": "Series not found in Sonarr lookup"
                 }
 
-            res = await sc.add_series(candidates[0], qp_id, rf_path, search_on_add)
+            res = await sc.add_series(candidates[0], qp_id, rf_path, search_on_add, season_folder)
             res["destination"] = "sonarr"
             return res
         except Exception as e:

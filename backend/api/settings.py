@@ -375,6 +375,7 @@ class ArrSaveRequest(BaseModel):
     quality_profile_id: Optional[int] = None
     root_folder_path: Optional[str] = None
     search_on_add: Optional[bool] = True
+    season_folder: Optional[bool] = True
 
 class ArrDisconnectRequest(BaseModel):
     type: str  # "radarr" | "sonarr"
@@ -443,6 +444,9 @@ async def save_arr_settings(req: ArrSaveRequest, db: Session = Depends(get_db), 
         f"{prefix}_search_on_add": "true" if req.search_on_add else "false"
     }
 
+    if prefix == "sonarr":
+        settings_to_update["sonarr_season_folder"] = "true" if req.season_folder else "false"
+
     for k, v in settings_to_update.items():
         s = db.query(AppSetting).filter(AppSetting.key == k).first()
         if not s:
@@ -469,7 +473,8 @@ async def disconnect_arr(req: ArrDisconnectRequest, db: Session = Depends(get_db
         f"{prefix}_api_key",
         f"{prefix}_quality_profile_id",
         f"{prefix}_root_folder_path",
-        f"{prefix}_search_on_add"
+        f"{prefix}_search_on_add",
+        f"{prefix}_season_folder"
     ]
     for k in keys:
         s = db.query(AppSetting).filter(AppSetting.key == k).first()
