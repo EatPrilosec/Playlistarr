@@ -69,6 +69,9 @@ async def sync_list_config(db: Session, list_config: ListConfig):
                     }
                     if list_config.is_global:
                         # For global playlists: create ONCE on the server as public
+                        if ms_client.server_type != "jellyfin":
+                            await ms_client.detect_server_type()
+
                         if ms_client.server_type == "jellyfin":
                             users = await ms_client.get_users()
                             admin_id = None

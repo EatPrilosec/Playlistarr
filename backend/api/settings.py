@@ -83,8 +83,13 @@ async def test_server(req: ServerRequest, current_user: User = Depends(get_curre
     from ..services.media_server import MediaServerClient
     client = MediaServerClient(req.url.rstrip("/"), req.api_key, req.server_type)
     try:
+        detected = await client.detect_server_type()
         await client.get_users()
-        return {"status": "ok", "message": "Connection successful"}
+        return {
+            "status": "ok",
+            "message": f"Connection successful ({detected.capitalize()} detected)",
+            "detected_type": detected
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Connection failed: {str(e)}")
 
@@ -93,9 +98,14 @@ async def add_server(req: ServerRequest, db: Session = Depends(get_db), current_
     if not current_user.is_admin:
         raise HTTPException(status_code=403)
         
+    from ..services.media_server import MediaServerClient
+    client = MediaServerClient(req.url.rstrip("/"), req.api_key, req.server_type)
+    detected_type = await client.detect_server_type()
+    server_type = detected_type or req.server_type
+
     server = Server(
         url=req.url.rstrip("/"),
-        server_type=req.server_type,
+        server_type=server_type,
         name=req.name,
         api_key=req.api_key
     )
@@ -113,8 +123,13 @@ async def update_server(server_id: int, req: ServerRequest, db: Session = Depend
     if not server:
         raise HTTPException(status_code=404)
         
+    from ..services.media_server import MediaServerClient
+    client = MediaServerClient(req.url.rstrip("/"), req.api_key, req.server_type)
+    detected_type = await client.detect_server_type()
+    server_type = detected_type or req.server_type
+
     server.url = req.url.rstrip("/")
-    server.server_type = req.server_type
+    server.server_type = server_type
     server.name = req.name
     server.api_key = req.api_key
     

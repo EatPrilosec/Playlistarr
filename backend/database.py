@@ -51,6 +51,25 @@ def run_migrations():
                     if col not in cols:
                         cursor.execute(f"ALTER TABLE list_configs ADD COLUMN {col} {col_type}")
                 conn.connection.commit()
+
+            # Auto-detect and fix mismatched server_type in servers table
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='servers'")
+            if cursor.fetchone():
+                cursor.execute("SELECT id, url, server_type FROM servers")
+                servers = cursor.fetchall()
+                for s_id, s_url, s_type in servers:
+                    if s_url and s_type == "emby":
+                        try:
+                            import httpx
+                            resp = httpx.get(f"{s_url.rstrip('/')}/System/Info/Public", timeout=2.0)
+                            if resp.status_code == 200:
+                                prod = str(resp.json().get("ProductName", "")).lower()
+                                srv_hdr = str(resp.headers.get("Server", "")).lower()
+                                if "jellyfin" in prod or "jellyfin" in srv_hdr:
+                                    cursor.execute("UPDATE servers SET server_type = 'jellyfin' WHERE id = ?", (s_id,))
+                                    conn.connection.commit()
+                        except Exception:
+                            pass
     except Exception as e:
         print(f"Migration notice: {e}")
 

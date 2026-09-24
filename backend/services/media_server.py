@@ -59,6 +59,24 @@ class MediaServerClient:
             "Authorization": f'MediaBrowser Token="{self.api_key}"',
             "X-Emby-Token": self.api_key
         }
+
+    async def detect_server_type(self) -> str:
+        """Detects whether the media server is Emby or Jellyfin."""
+        try:
+            async with httpx.AsyncClient(headers=self.headers, timeout=5.0) as client:
+                resp = await client.get(f"{self.server_url}/System/Info/Public")
+                if resp.status_code == 200:
+                    prod = str(resp.json().get("ProductName", "")).lower()
+                    srv_hdr = str(resp.headers.get("Server", "")).lower()
+                    if "jellyfin" in prod or "jellyfin" in srv_hdr:
+                        self.server_type = "jellyfin"
+                        return "jellyfin"
+                    elif "emby" in prod or "emby" in srv_hdr or resp.json().get("ServerName"):
+                        self.server_type = "emby"
+                        return "emby"
+        except Exception:
+            pass
+        return self.server_type
         
     async def find_series_id(
         self,
@@ -436,6 +454,25 @@ class MediaServerClient:
                 ]
                 
             resp = await client.post(create_url, json=create_body, params=create_params)
+            # If rejected without userId (e.g. server is Jellyfin or requires an owner), resolve admin and retry
+            if resp.status_code != 200 and not user_id:
+                try:
+                    users = await self.get_users()
+                    admin_u = None
+                    for u in users:
+                        if u.get("Policy", {}).get("IsAdministrator"):
+                            admin_u = u.get("Id")
+                            break
+                    retry_user_id = admin_u or (users[0]["Id"] if users else None)
+                    if retry_user_id:
+                        user_id = retry_user_id
+                        create_params["userId"] = retry_user_id
+                        create_body["UserId"] = retry_user_id
+                        self.server_type = "jellyfin"
+                        resp = await client.post(create_url, json=create_body, params=create_params)
+                except Exception as retry_err:
+                    print(f"Fallback retry with userId failed: {retry_err}")
+
             if resp.status_code != 200:
                 raise Exception(f"Failed to create playlist {name}: {resp.status_code} {resp.text}")
                 
