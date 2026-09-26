@@ -11,6 +11,7 @@ from ..models import ListConfig, User, Server, SyncLog
 from .auth import get_current_user
 from ..services.media_server import MediaServerClient
 from ..services.sync_engine import run_sync_background, get_playlist_items_with_matches
+from ..services.sync_tracker import sync_tracker
 from ..services.arr_client import RadarrClient, SonarrClient, get_arr_config
 
 router = APIRouter(prefix="/api/playlists", tags=["playlists"])
@@ -170,6 +171,12 @@ async def update_playlist(
     bg_tasks.add_task(run_sync_background, config.id)
     return config
 
+@router.get("/sync-status")
+async def get_all_sync_statuses(
+    current_user: User = Depends(get_current_user)
+):
+    return sync_tracker.get_all()
+
 @router.get("/{playlist_id}/status")
 async def get_playlist_status(
     playlist_id: int, 
@@ -183,11 +190,20 @@ async def get_playlist_status(
     if not current_user.is_admin and (config.is_global or config.user_id != current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized to view this playlist")
 
+    active = sync_tracker.get_sync(playlist_id)
+    if active:
+        return active
+
     from ..models import SyncLog
     log = db.query(SyncLog).filter(SyncLog.list_config_id == playlist_id).order_by(SyncLog.last_sync.desc()).first()
     if log:
-        return {"status": log.status, "details": log.details, "last_sync": log.last_sync}
-    return {"status": "pending", "details": "Waiting for first sync", "last_sync": None}
+        return {
+            "status": log.status,
+            "details": log.details,
+            "last_sync": log.last_sync,
+            "progress": 100 if log.status == "success" else 0
+        }
+    return {"status": "pending", "details": "Waiting for first sync", "last_sync": None, "progress": 0}
 
 @router.get("/{playlist_id}/items")
 async def get_playlist_items(
@@ -228,6 +244,23 @@ async def refresh_playlist_items(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to refresh items: {str(e)}")
 
+@router.post("/sync-all")
+async def manual_sync_all(
+    bg_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.is_admin:
+        configs = db.query(ListConfig).all()
+    else:
+        configs = db.query(ListConfig).filter(ListConfig.user_id == current_user.id).all()
+        
+    for conf in configs:
+        sync_tracker.start_sync(conf.id, conf.name)
+        bg_tasks.add_task(run_sync_background, conf.id)
+        
+    return {"message": f"Queued {len(configs)} playlists for sync", "statuses": sync_tracker.get_all()}
+
 @router.post("/{playlist_id}/sync")
 async def manual_sync_playlist(
     playlist_id: int, 
@@ -242,8 +275,9 @@ async def manual_sync_playlist(
     if not current_user.is_admin and (config.is_global or config.user_id != current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized to sync this playlist")
         
+    sync_tracker.start_sync(config.id, config.name)
     bg_tasks.add_task(run_sync_background, config.id)
-    return {"message": "Sync queued"}
+    return {"message": "Sync queued", "status": sync_tracker.get_sync(config.id)}
 
 @router.delete("/{playlist_id}")
 async def delete_playlist(

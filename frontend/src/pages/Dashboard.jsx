@@ -36,6 +36,8 @@ export default function Dashboard() {
   
   // Status state
   const [playlistStatuses, setPlaylistStatuses] = useState({});
+  const syncPollers = useRef({});
+  const [syncToasts, setSyncToasts] = useState([]);
 
   // Items Inspection Modal State
   const [inspectingPlaylist, setInspectingPlaylist] = useState(null);
@@ -61,6 +63,17 @@ export default function Dashboard() {
   const [arrImportStatus, setArrImportStatus] = useState(null);
   const [loadingArrStatus, setLoadingArrStatus] = useState(false);
   const [registeringArr, setRegisteringArr] = useState(null);
+
+  const activeSyncList = useMemo(() => {
+    return playlists
+      .filter(p => playlistStatuses[p.id]?.status === 'syncing')
+      .map(p => ({
+        ...p,
+        sync: playlistStatuses[p.id]
+      }));
+  }, [playlists, playlistStatuses]);
+
+  const isAnySyncing = activeSyncList.length > 0;
 
   const handleOpenItems = async (playlist, forceRefresh = false) => {
     setInspectingPlaylist(playlist);
@@ -195,7 +208,65 @@ export default function Dashboard() {
     });
   }, [itemsData, itemsFilter, serverFilter, itemsSearchQuery]);
 
-  const fetchPlaylists = async () => {
+  const startPollingSync = (playlistId, playlistName) => {
+    if (syncPollers.current[playlistId]) {
+      clearInterval(syncPollers.current[playlistId]);
+    }
+
+    const poll = async () => {
+      try {
+        const resp = await fetch(`/api/playlists/${playlistId}/status`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        if (resp.ok) {
+          const st = await resp.json();
+          setPlaylistStatuses(prev => ({ ...prev, [playlistId]: st }));
+
+          if (st.status === 'success' || st.status === 'error') {
+            clearInterval(syncPollers.current[playlistId]);
+            delete syncPollers.current[playlistId];
+
+            // Add toast notification
+            const toastId = `${playlistId}-${Date.now()}`;
+            setSyncToasts(prev => [
+              ...prev.filter(t => t.playlistId !== playlistId),
+              {
+                id: toastId,
+                playlistId,
+                name: playlistName || `Playlist #${playlistId}`,
+                status: st.status,
+                details: st.details || (st.status === 'success' ? 'Sync completed successfully' : 'Sync error occurred'),
+                timestamp: Date.now()
+              }
+            ]);
+
+            // Auto-dismiss toast after 7s
+            setTimeout(() => {
+              setSyncToasts(prev => prev.filter(t => t.id !== toastId));
+            }, 7000);
+
+            // Refresh playlists data without wiping polling
+            fetchPlaylists(false);
+
+            // If inspection modal is open for this playlist, refresh items
+            setInspectingPlaylist(curr => {
+              if (curr && curr.id === playlistId) {
+                handleOpenItems(curr, false);
+              }
+              return curr;
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error polling playlist status:', err);
+      }
+    };
+
+    poll();
+    syncPollers.current[playlistId] = setInterval(poll, 1000);
+  };
+
+  const fetchPlaylists = async (checkSyncing = true) => {
     try {
       const resp = await fetch('/api/playlists', {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
@@ -216,7 +287,12 @@ export default function Dashboard() {
             headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
           })
           .then(r => r.json())
-          .then(st => setPlaylistStatuses(prev => ({ ...prev, [p.id]: st })))
+          .then(st => {
+            setPlaylistStatuses(prev => ({ ...prev, [p.id]: st }));
+            if (checkSyncing && st.status === 'syncing' && !syncPollers.current[p.id]) {
+              startPollingSync(p.id, p.name);
+            }
+          })
           .catch(e => console.error(e));
         });
       }
@@ -340,6 +416,10 @@ export default function Dashboard() {
     fetchPlaylists();
     fetchUsers();
     fetchArrConfig();
+    const pollers = syncPollers.current;
+    return () => {
+      Object.values(pollers).forEach(clearInterval);
+    };
   }, []);
 
   const handleFileUpload = async (file, type) => {
@@ -563,22 +643,73 @@ export default function Dashboard() {
     }
   };
 
-  const handleSync = async (id) => {
+  const handleSync = async (target) => {
+    const id = typeof target === 'object' ? target.id : target;
+    const playlist = playlists.find(x => x.id === id) || (typeof target === 'object' ? target : { id, name: `Playlist #${id}` });
     try {
       setPlaylistStatuses(prev => ({
         ...prev,
-        [id]: { status: 'syncing', details: 'Sync queued...', last_sync: new Date().toISOString() }
+        [id]: { 
+          status: 'syncing', 
+          stage: 'starting',
+          details: `Initiating sync for "${playlist.name}"...`, 
+          progress: 5,
+          last_sync: new Date().toISOString() 
+        }
       }));
-      await fetch(`/api/playlists/${id}/sync`, {
+      const resp = await fetch(`/api/playlists/${id}/sync`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
-      // Wait a bit and refresh status
-      setTimeout(() => {
-        fetchPlaylists();
-      }, 3000);
+      if (resp.ok) {
+        const resData = await resp.json();
+        if (resData.status) {
+          setPlaylistStatuses(prev => ({ ...prev, [id]: resData.status }));
+        }
+        startPollingSync(id, playlist.name);
+      } else {
+        const err = await resp.json();
+        setPlaylistStatuses(prev => ({
+          ...prev,
+          [id]: { status: 'error', details: err.detail || 'Failed to start sync', progress: 0 }
+        }));
+      }
     } catch (err) {
       console.error(err);
+      setPlaylistStatuses(prev => ({
+        ...prev,
+        [id]: { status: 'error', details: 'Network error starting sync', progress: 0 }
+      }));
+    }
+  };
+
+  const handleSyncAll = async () => {
+    try {
+      playlists.forEach(p => {
+        setPlaylistStatuses(prev => ({
+          ...prev,
+          [p.id]: {
+            status: 'syncing',
+            stage: 'starting',
+            details: `Queueing sync for "${p.name}"...`,
+            progress: 5,
+            last_sync: new Date().toISOString()
+          }
+        }));
+      });
+
+      const resp = await fetch('/api/playlists/sync-all', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+
+      if (resp.ok) {
+        playlists.forEach(p => {
+          startPollingSync(p.id, p.name);
+        });
+      }
+    } catch (err) {
+      console.error('Failed to sync all:', err);
     }
   };
 
@@ -586,17 +717,38 @@ export default function Dashboard() {
     <div className="animate-fade-in">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <h2 className="page-title" style={{ margin: 0 }}>Playlists</h2>
-        <button className="btn btn-primary" onClick={() => {
-          setEditingId(null);
-          setName('');
-          setUrl('');
-          setImageUrl('');
-          setBackdropUrl('');
-          setBannerUrl('');
-          setShowAddModal(!showAddModal);
-        }}>
-          <Plus size={18} style={{ marginRight: '0.5rem' }} /> {showAddModal && !editingId ? 'Cancel' : 'Add Playlist'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          {playlists.length > 0 && (
+            <button 
+              className="btn btn-secondary" 
+              onClick={handleSyncAll}
+              disabled={isAnySyncing}
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.5rem', 
+                padding: '0.75rem 1.25rem',
+                opacity: isAnySyncing ? 0.7 : 1,
+                cursor: isAnySyncing ? 'not-allowed' : 'pointer'
+              }}
+              title={isAnySyncing ? "Sync already in progress" : "Sync all playlists to media servers"}
+            >
+              <RefreshCw size={16} className={isAnySyncing ? 'animate-spin' : ''} style={{ color: isAnySyncing ? 'var(--primary)' : 'inherit' }} /> 
+              {isAnySyncing ? 'Syncing...' : 'Sync All'}
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={() => {
+            setEditingId(null);
+            setName('');
+            setUrl('');
+            setImageUrl('');
+            setBackdropUrl('');
+            setBannerUrl('');
+            setShowAddModal(!showAddModal);
+          }}>
+            <Plus size={18} style={{ marginRight: '0.5rem' }} /> {showAddModal && !editingId ? 'Cancel' : 'Add Playlist'}
+          </button>
+        </div>
       </div>
 
       {showAddModal && (
@@ -883,6 +1035,59 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Active Sync Progress Banner / HUD */}
+      {activeSyncList.length > 0 && (
+        <div className="active-sync-banner animate-fade-in" style={{
+          marginBottom: '2rem',
+          padding: '1.25rem 1.5rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1rem'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.65rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <RefreshCw size={18} className="animate-spin" style={{ color: '#818cf8' }} />
+              <span style={{ fontWeight: 600, fontSize: '1rem', letterSpacing: '0.2px' }}>
+                Sync in Progress ({activeSyncList.length})
+              </span>
+            </div>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              Real-time media server syncing
+            </span>
+          </div>
+
+          {activeSyncList.map(syncItem => (
+            <div key={syncItem.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-color)' }}>{syncItem.name}</span>
+                  <span style={{
+                    fontSize: '0.75rem',
+                    padding: '2px 8px',
+                    borderRadius: '10px',
+                    background: 'rgba(99, 102, 241, 0.25)',
+                    color: '#a5b4fc',
+                    fontWeight: 600
+                  }}>
+                    {syncItem.sync?.progress || 5}%
+                  </span>
+                </div>
+                <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  {syncItem.sync?.details || 'Processing...'}
+                </span>
+              </div>
+
+              <div className="sync-progress-track" style={{ height: '7px' }}>
+                <div 
+                  className="sync-progress-fill" 
+                  style={{ width: `${Math.max(5, syncItem.sync?.progress || 5)}%` }} 
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="grid">
         {playlists.length === 0 && (
           <div className="glass-panel" style={{ padding: '3rem', textAlign: 'center', gridColumn: '1 / -1' }}>
@@ -893,7 +1098,7 @@ export default function Dashboard() {
         )}
         
         {playlists.map(p => (
-          <div key={p.id} className="card glass-panel" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div key={p.id} className={`card glass-panel ${playlistStatuses[p.id]?.status === 'syncing' ? 'syncing-card' : ''}`} style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', transition: 'all 0.3s ease' }}>
             
             {/* Visual Hero Header */}
             <div style={{
@@ -979,44 +1184,86 @@ export default function Dashboard() {
               
               <div className="card-footer" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '1rem', marginTop: 'auto', paddingTop: '1rem' }}>
                 
-                <div 
-                  onClick={() => handleOpenItems(p)}
-                  style={{ 
-                    padding: '0.75rem', 
-                    borderRadius: '6px', 
-                    background: 'rgba(0,0,0,0.25)', 
-                    fontSize: '0.85rem',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                    border: '1px solid transparent'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)'}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}
-                  title="Click to inspect matched and missing items"
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span style={{ 
-                        width: '8px', height: '8px', borderRadius: '50%', 
-                        background: playlistStatuses[p.id]?.status === 'success' ? 'var(--success)' : 
-                                    playlistStatuses[p.id]?.status === 'error' ? 'var(--danger)' : 
-                                    playlistStatuses[p.id]?.status === 'syncing' ? 'var(--primary)' : 'var(--text-muted)' 
-                      }}></span>
-                      <strong style={{ textTransform: 'capitalize' }}>{playlistStatuses[p.id]?.status || 'Loading...'}</strong>
-                      {playlistStatuses[p.id]?.last_sync && (
-                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                          ({new Date(playlistStatuses[p.id].last_sync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
-                        </span>
-                      )}
+                {playlistStatuses[p.id]?.status === 'syncing' ? (
+                  <div 
+                    style={{ 
+                      padding: '0.85rem', 
+                      borderRadius: '8px', 
+                      background: 'rgba(99, 102, 241, 0.08)', 
+                      fontSize: '0.85rem',
+                      border: '1px solid rgba(99, 102, 241, 0.35)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.5rem',
+                      boxShadow: '0 4px 15px rgba(99, 102, 241, 0.15)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span className="pulse-dot" style={{ 
+                          width: '8px', height: '8px', borderRadius: '50%', 
+                          background: '#818cf8',
+                          boxShadow: '0 0 8px #818cf8'
+                        }}></span>
+                        <strong style={{ color: '#818cf8', letterSpacing: '0.2px' }}>
+                          Syncing... ({playlistStatuses[p.id]?.progress || 5}%)
+                        </strong>
+                      </div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                        Live Progress
+                      </span>
                     </div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '3px', fontWeight: 500 }}>
-                      <ListFilter size={12} /> View Items
-                    </span>
+
+                    <div style={{ color: 'var(--text-color)', fontSize: '0.82rem', fontWeight: 500, lineHeight: 1.3 }}>
+                      {playlistStatuses[p.id]?.details || 'Processing items...'}
+                    </div>
+
+                    <div className="sync-progress-track">
+                      <div 
+                        className="sync-progress-fill" 
+                        style={{ width: `${Math.max(5, playlistStatuses[p.id]?.progress || 5)}%` }}
+                      />
+                    </div>
                   </div>
-                  <div style={{ color: 'var(--text-muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {playlistStatuses[p.id]?.details || ''}
+                ) : (
+                  <div 
+                    onClick={() => handleOpenItems(p)}
+                    style={{ 
+                      padding: '0.75rem', 
+                      borderRadius: '6px', 
+                      background: 'rgba(0,0,0,0.25)', 
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      border: '1px solid transparent'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)'}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}
+                    title="Click to inspect matched and missing items"
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ 
+                          width: '8px', height: '8px', borderRadius: '50%', 
+                          background: playlistStatuses[p.id]?.status === 'success' ? 'var(--success)' : 
+                                      playlistStatuses[p.id]?.status === 'error' ? 'var(--danger)' : 'var(--text-muted)' 
+                        }}></span>
+                        <strong style={{ textTransform: 'capitalize' }}>{playlistStatuses[p.id]?.status || 'Loading...'}</strong>
+                        {playlistStatuses[p.id]?.last_sync && (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                            ({new Date(playlistStatuses[p.id].last_sync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '3px', fontWeight: 500 }}>
+                        <ListFilter size={12} /> View Items
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {playlistStatuses[p.id]?.details || ''}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
                   <button 
@@ -1027,8 +1274,19 @@ export default function Dashboard() {
                   >
                     <ListFilter size={15} /> Matches
                   </button>
-                  <button className="btn btn-secondary" style={{ padding: '0.4rem', borderRadius: '6px' }} title="Sync Now" onClick={() => handleSync(p.id)}>
-                    <RefreshCw size={16} className={playlistStatuses[p.id]?.status === 'syncing' ? 'animate-spin' : ''} />
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ 
+                      padding: '0.4rem', 
+                      borderRadius: '6px',
+                      opacity: playlistStatuses[p.id]?.status === 'syncing' ? 0.6 : 1,
+                      cursor: playlistStatuses[p.id]?.status === 'syncing' ? 'not-allowed' : 'pointer'
+                    }} 
+                    title={playlistStatuses[p.id]?.status === 'syncing' ? "Sync in progress..." : "Sync Now"} 
+                    onClick={() => handleSync(p)}
+                    disabled={playlistStatuses[p.id]?.status === 'syncing'}
+                  >
+                    <RefreshCw size={16} className={playlistStatuses[p.id]?.status === 'syncing' ? 'animate-spin' : ''} style={{ color: playlistStatuses[p.id]?.status === 'syncing' ? 'var(--primary)' : 'inherit' }} />
                   </button>
                   <button className="btn btn-secondary" style={{ padding: '0.4rem', borderRadius: '6px' }} title="Export Playlist (JSON)" onClick={() => handleExport(p)}>
                     <Download size={16} />
@@ -2005,6 +2263,43 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Sync Toast Notifications */}
+      <div className="sync-toast-container">
+        {syncToasts.map(toast => (
+          <div 
+            key={toast.id} 
+            className="sync-toast glass-panel animate-fade-in"
+            style={{
+              border: toast.status === 'success' ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(239, 68, 68, 0.4)',
+              background: toast.status === 'success' 
+                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(15, 23, 42, 0.95))' 
+                : 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(15, 23, 42, 0.95))',
+            }}
+          >
+            {toast.status === 'success' ? (
+              <CheckCircle2 size={20} style={{ color: 'var(--success)', flexShrink: 0, marginTop: '2px' }} />
+            ) : (
+              <XCircle size={20} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: '2px' }} />
+            )}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: '0.2rem', color: '#fff' }}>
+                {toast.status === 'success' ? `Sync Completed: "${toast.name}"` : `Sync Failed: "${toast.name}"`}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                {toast.details}
+              </div>
+            </div>
+            <button 
+              onClick={() => setSyncToasts(prev => prev.filter(t => t.id !== toast.id))}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px', display: 'flex' }}
+              title="Dismiss"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -381,7 +381,7 @@ class MediaServerClient:
                 return resp.json()
             raise Exception(f"Failed to get users (HTTP {resp.status_code}): {resp.text}")
 
-    async def create_or_update_playlist(self, name: str, item_ids: list[str], user_id: str = None, images: dict = None, is_public: bool = True):
+    async def create_or_update_playlist(self, name: str, item_ids: list[str], user_id: str = None, images: dict = None, is_public: bool = True, progress_callback = None):
         """Creates a playlist or updates an existing one, and sets custom artwork if provided"""
         # For private playlists or Jellyfin public playlists, resolve target user ID
         if not user_id and (self.server_type == "jellyfin" or not is_public):
@@ -443,6 +443,9 @@ class MediaServerClient:
             # Pass initial batch directly to create the playlist (up to 100 items)
             initial_ids = item_ids[:100] if item_ids else []
             remaining_ids = item_ids[100:] if item_ids and len(item_ids) > 100 else []
+            chunk_size = 100
+            total_batches = 1 + ((len(remaining_ids) + chunk_size - 1) // chunk_size if remaining_ids else 0)
+
             if initial_ids:
                 create_params["Ids"] = ",".join(initial_ids)
 
@@ -482,11 +485,18 @@ class MediaServerClient:
                 raise Exception(f"Failed to create playlist {name}: {resp.status_code} {resp.text}")
                 
             new_playlist_id = resp.json().get("Id")
+
+            if progress_callback:
+                try:
+                    res = progress_callback(1, total_batches, len(initial_ids), len(item_ids))
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception as cb_err:
+                    print(f"Progress callback error: {cb_err}")
             
             # If remaining items exist, chunk into batches of 100 to avoid query string length limits
             if remaining_ids and new_playlist_id:
-                chunk_size = 100
-                for i in range(0, len(remaining_ids), chunk_size):
+                for idx, i in enumerate(range(0, len(remaining_ids), chunk_size)):
                     chunk = remaining_ids[i:i + chunk_size]
                     add_url = f"{self.server_url}/Playlists/{new_playlist_id}/Items"
                     add_params = {
@@ -497,6 +507,16 @@ class MediaServerClient:
                     add_resp = await client.post(add_url, params=add_params)
                     if add_resp.status_code not in [200, 204]:
                         raise Exception(f"Failed to add items batch to playlist: {add_resp.status_code} {add_resp.text}")
+                    
+                    if progress_callback:
+                        try:
+                            batch_num = idx + 2
+                            uploaded_so_far = len(initial_ids) + i + len(chunk)
+                            res = progress_callback(batch_num, total_batches, uploaded_so_far, len(item_ids))
+                            if asyncio.iscoroutine(res):
+                                await res
+                        except Exception as cb_err:
+                            print(f"Progress callback error: {cb_err}")
 
             # If images provided, set them on the playlist
             if images and new_playlist_id:
