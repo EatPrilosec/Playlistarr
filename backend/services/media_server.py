@@ -434,17 +434,22 @@ class MediaServerClient:
                     print(f"Error removing existing playlist {old_id}: {de}")
             
             create_url = f"{self.server_url}/Playlists"
-            create_params = {}
+            create_params = {
+                "mediaType": "Video"
+            }
             if user_id:
                 create_params["userId"] = user_id
             
-            # If items count <= 100, pass Ids directly to create
-            if item_ids and len(item_ids) <= 100:
-                create_params["Ids"] = ",".join(item_ids)
+            # Pass initial batch directly to create the playlist (up to 100 items)
+            initial_ids = item_ids[:100] if item_ids else []
+            remaining_ids = item_ids[100:] if item_ids and len(item_ids) > 100 else []
+            if initial_ids:
+                create_params["Ids"] = ",".join(initial_ids)
 
             create_body = {
                 "Name": name,
-                "IsPublic": is_public
+                "IsPublic": is_public,
+                "MediaType": "Video"
             }
             if user_id:
                 create_body["UserId"] = user_id
@@ -478,11 +483,11 @@ class MediaServerClient:
                 
             new_playlist_id = resp.json().get("Id")
             
-            # If items count > 100, chunk into batches of 100 to avoid query string length limits
-            if item_ids and len(item_ids) > 100 and new_playlist_id:
+            # If remaining items exist, chunk into batches of 100 to avoid query string length limits
+            if remaining_ids and new_playlist_id:
                 chunk_size = 100
-                for i in range(0, len(item_ids), chunk_size):
-                    chunk = item_ids[i:i + chunk_size]
+                for i in range(0, len(remaining_ids), chunk_size):
+                    chunk = remaining_ids[i:i + chunk_size]
                     add_url = f"{self.server_url}/Playlists/{new_playlist_id}/Items"
                     add_params = {
                         "ids": ",".join(chunk)
